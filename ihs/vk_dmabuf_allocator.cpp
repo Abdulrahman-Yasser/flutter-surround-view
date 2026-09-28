@@ -175,7 +175,11 @@ bool VkDmabufAllocator::create(uint32_t width, uint32_t height, uint64_t modifie
     ic.samples = VK_SAMPLE_COUNT_1_BIT;
     ic.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
     // GL renders into it through the imported dma-buf; the compositor samples it.
-    ic.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    // TRANSFER_SRC matches the usage ivi-homescreen imports with: v3dv sizes a
+    // UIF image with it 64 bytes larger, and an import larger than the dma-buf
+    // fails with VK_ERROR_INVALID_EXTERNAL_HANDLE on every frame.
+    ic.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+               VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     ic.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
