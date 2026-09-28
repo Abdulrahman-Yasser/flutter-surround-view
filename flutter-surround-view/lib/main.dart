@@ -66,7 +66,25 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
       );
   }
 
-  void _cameraTap(CameraId camera) => setState(() {
+  bool _transitioning = false;
+
+  // Forces a frame with no BevView mounted before the next one is built, so
+  // the outgoing view's platform-view dispose is sent before the incoming
+  // one's create. Skipping this let create race dispose and starve the
+  // camera release behind a blocked create call.
+  void _switchView(VoidCallback applyChange) {
+    if (_transitioning) return;
+    setState(() => _transitioning = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        applyChange();
+        _transitioning = false;
+      });
+    });
+  }
+
+  void _cameraTap(CameraId camera) => _switchView(() {
         final ViewMode m = _viewModeForCamera(camera);
         if (_mode == m) {
           _camSubView[camera] = _camSubView[camera]!.next;
@@ -76,7 +94,7 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
         }
       });
 
-  void _sideViewsTap() => setState(() {
+  void _sideViewsTap() => _switchView(() {
         if (_mode == ViewMode.sideViews) {
           final CameraSubView next = _camSubView[CameraId.left]!.next;
           _camSubView[CameraId.left] = next;
@@ -88,7 +106,7 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
         }
       });
 
-  void _frontRearTap() => setState(() {
+  void _frontRearTap() => _switchView(() {
         if (_mode == ViewMode.frontRear) {
           _frontRearCamera = _frontRearCamera == CameraId.front
               ? CameraId.rear
@@ -153,12 +171,14 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
     return Stack(
       children: <Widget>[
         Positioned.fill(
-          child: CameraViewport(
-            mode: _mode,
-            overlays: _overlays,
-            camSubViews: _camSubView,
-            frontRearCamera: _frontRearCamera,
-          ),
+          child: _transitioning
+              ? const ColoredBox(color: Color(0xFF0A0A0C))
+              : CameraViewport(
+                  mode: _mode,
+                  overlays: _overlays,
+                  camSubViews: _camSubView,
+                  frontRearCamera: _frontRearCamera,
+                ),
         ),
         Positioned(
           left: 10,
@@ -211,7 +231,7 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
             ),
             TopToolbar(
               mode: _mode,
-              onModeChanged: (ViewMode m) => setState(() => _mode = m),
+              onModeChanged: (ViewMode m) => _switchView(() => _mode = m),
               camSubViews: _camSubView,
               onCameraTap: _cameraTap,
               onSideViewsTap: _sideViewsTap,
