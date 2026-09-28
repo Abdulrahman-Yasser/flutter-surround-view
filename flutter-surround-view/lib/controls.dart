@@ -51,9 +51,9 @@ class TopToolbar extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool sideViewsSelected = mode == ViewMode.sideViews;
     return Container(
-      height: 60,
+      height: 46,
       color: _barColor,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Row(
         children: <Widget>[
           Expanded(
@@ -131,7 +131,7 @@ class TopToolbar extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           _QuickActionsMenu(
             overlays: overlays,
             calibrating: calibrating,
@@ -139,14 +139,14 @@ class TopToolbar extends StatelessWidget {
             onToggleCalibrate: onToggleCalibrate,
             onSnapshot: onSnapshot,
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           _ToolbarButton(
             icon: Icons.settings,
             label: 'Settings',
             selected: false,
             onTap: onSettings,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           _BackendPill(connected: backendConnected),
         ],
       ),
@@ -171,23 +171,23 @@ class _ToolbarButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color fg = selected ? Colors.white : Colors.white70;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Material(
         color: selected ? _accent : Colors.white10,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6),
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(6),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Icon(icon, size: 18, color: fg),
-                const SizedBox(width: 6),
+                Icon(icon, size: 14, color: fg),
+                const SizedBox(width: 4),
                 Text(
                   label,
-                  style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 12),
+                  style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 10),
                 ),
               ],
             ),
@@ -254,15 +254,15 @@ class _QuickActionsMenu extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white10,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(6),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(Icons.more_horiz, size: 18, color: Colors.white70),
+            Icon(Icons.more_horiz, size: 14, color: Colors.white70),
             SizedBox(width: 2),
-            Icon(Icons.keyboard_arrow_down, size: 16, color: Colors.white70),
+            Icon(Icons.keyboard_arrow_down, size: 12, color: Colors.white70),
           ],
         ),
       ),

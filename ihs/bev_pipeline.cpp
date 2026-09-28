@@ -47,7 +47,9 @@ std::shared_ptr<CameraManager> acquire_camera_manager(const std::string &tuning_
 
 bool acquire_camera(libcamera::Camera &camera)
 {
-    for (int attempt = 0; attempt < 40; ++attempt) {
+    // Switching views tears down the old pipeline (including its camera
+    // release) on another thread; 2s wasn't always enough to outlast that.
+    for (int attempt = 0; attempt < 120; ++attempt) {
         if (camera.acquire() == 0) return true;
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
