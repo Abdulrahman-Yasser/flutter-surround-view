@@ -73,13 +73,3 @@ enum CameraSubView {
 }
 
 enum CameraOverlay { guidelines, distanceGrid }
-
-enum CalAxis { x, y, yaw }
-
-class CalDelta {
-  CalDelta({this.x = 0, this.y = 0, this.yaw = 0});
-
-  double x;
-  double y;
-  double yaw;
-}

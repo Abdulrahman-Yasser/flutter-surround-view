@@ -413,17 +413,8 @@ static int run_file_mode(const char *path, const EGLState &egl, PreviewWindowPtr
 
 // ── N-camera surround-view mode ─────────────────────────────────────────────────
 
-// Per-slot camera pose — fully independent, unlike IpmParams's shared
-// height/pitch/yaw (dual mode) or hardcoded cam_x=0 (single-camera BEV
-// mode). px_per_m and the BEV canvas size stay global/shared (one output
-// canvas), so they're not in here.
-struct SlotParams {
-    double cam_x = 0.0, cam_y = 0.0, cam_h = 1.2, pitch = -30.0, yaw = 0.0;
-};
-
 struct Slot {
     std::string                 path;
-    SlotParams                  params;
     std::unique_ptr<FileSource> src;
     DmaBufFrame                 frame;
 };
@@ -480,8 +471,8 @@ static int run_multi_file_mode(const std::vector<std::string> &paths,
         if (!cfg.slots[cfg_slots[i]].has_hb2i) {
             std::cerr << "[multi] source " << i << " (" << paths[i] << ") maps to config "
                          "slot " << cfg_slots[i] << ", which has no hb2i configured in "
-                      << config_path << " -- calibrate it with calibrate_bev.py "
-                         "--slot-a/--slot-b first\n";
+                      << config_path << " -- calibrate it from the app's "
+                         "calibration screen first\n";
             return 1;
         }
     }
@@ -499,12 +490,6 @@ static int run_multi_file_mode(const std::vector<std::string> &paths,
             std::cerr << "[multi] failed to get first frame for source " << i << "\n";
             return 1;
         }
-        // Starting live pose is baseline + whatever delta was saved last time
-        // (see BevSlotConfig::cam_x_delta) -- not just the bare baseline, or
-        // a previously-tuned-and-saved offset would silently vanish on load.
-        const BevSlotConfig &sc = cfg.slots[cfg_slots[i]];
-        slots[i].params = SlotParams{ sc.cam_x + sc.cam_x_delta, sc.cam_y + sc.cam_y_delta,
-                                       sc.cam_h, sc.pitch, sc.yaw + sc.yaw_delta };
     }
 
     // Shared BEV canvas size — slot 0's first-frame dimensions, fixed for
@@ -541,42 +526,24 @@ static int run_multi_file_mode(const std::vector<std::string> &paths,
     // default (bev_config_defaults() if the file didn't specify one either).
     double px_per_m = px_per_m_from_cli ? cli_px_per_m : cfg.px_per_m;
 
-    // Rebuilds one slot's homography from its current params + current
-    // frame's own width/height, and re-uploads it. Cheap — only called on
-    // a keypress (or a path-swap commit) for the one changed slot, never
-    // per rendered frame.
+    // Re-uploads one slot's homography. Only called at init and when
+    // px_per_m or a slot's source changes, never per rendered frame.
     auto rebuild_slot = [&](int i, const char *changed) {
-        const DmaBufFrame &f = slots[i].frame;
-        const SlotParams  &p = slots[i].params;
         const BevSlotConfig &sc = cfg.slots[cfg_slots[i]];
-        // Deltas from this slot's as-loaded (calibration-time) pose -- see
-        // measured_H()'s comment for why only cam_x/cam_y/yaw can be
-        // live-tuned this way. Zero until the user actually touches
-        // X/x, G/g, or Y/y, so an untouched slot's projection is bit-for-bit
-        // the original fixed-Hb2i result.
-        double dx   = p.cam_x - sc.cam_x;
-        double dy   = p.cam_y - sc.cam_y;
-        double dyaw = p.yaw   - sc.yaw;
-        mat3 H = measured_H(sc.hb2i, f.width, f.height, px_per_m, canvas_w, canvas_h,
-                            dx, dy, dyaw);
+        mat3 H = measured_H(sc, px_per_m, canvas_w, canvas_h);
         float Hf[9];
         H.to_floats(Hf);
         // The blend coverage wedge (which canvas sector this camera is
         // allowed to contribute to) is a fact of the physical mounting --
-        // its own facing_deg config field, not derived from yaw at all, so
-        // two cameras that are both basically front-facing (just nudged a
-        // few degrees left/right via yaw) both correctly claim the front
-        // sector instead of splitting 90 degrees apart. Live yaw-tuning
-        // reprojects content via dyaw above without moving this boundary.
+        // its own facing_deg config field, so two cameras that are both
+        // basically front-facing both claim the front sector.
         float facing_deg = (float)sc.facing_deg;
         if (blend_mode == BlendMode::Pyramid)
             renderer.set_ipm_multi_pyramid(i, Hf, facing_deg);
         else
             renderer.set_ipm_multi(i, Hf, facing_deg);
-        std::printf("[multi] slot %d %-10s cam_x=%.2fm cam_y=%.2fm h=%.2fm "
-                    "pitch=%.1fdeg yaw=%.1fdeg (facing %.0fdeg, fixed)\n",
-                    cfg_slots[i] + 1, changed, p.cam_x, p.cam_y, p.cam_h, p.pitch, p.yaw,
-                    facing_deg);
+        std::printf("[multi] slot %d %-10s px_per_m=%.0f (facing %.0fdeg)\n",
+                    cfg_slots[i] + 1, changed, px_per_m, facing_deg);
     };
     auto rebuild_all = [&](const char *changed) {
         for (int i = 0; i < n; ++i) rebuild_slot(i, changed);
@@ -674,8 +641,7 @@ static int run_multi_file_mode(const std::vector<std::string> &paths,
     std::printf(
         "[keys] s=snapshot  +/-=overlap(deg)  [/]=sharpness  c=sanity-check  "
         "F=toggle free-yaw\n"
-        "       1..%d=select slot  E=edit path  L=edit lens_model\n"
-        "       H/h=height+-  P/p=pitch+-  Y/y=yaw+-  G/g=cam_y+-  X/x=cam_x+-  "
+        "       1..%d=select slot  E=edit path  L=edit lens_model  "
         "M/m=px_per_m+- (global)\n"
         "       B/b=car_x+-  N/n=car_y+- (global, car icon)  "
         "W=save as default  Ctrl+C=stop\n", n);
@@ -802,13 +768,7 @@ static int run_multi_file_mode(const std::vector<std::string> &paths,
                 std::printf("[multi] overlap(deg)=%.0f edge=%.2f\n", overlap_deg, blend_edge);
             } else if (key == 'c') {
                 for (int i = 0; i < n; ++i) {
-                    const DmaBufFrame &f = slots[i].frame;
-                    const SlotParams &p = slots[i].params;
-                    const BevSlotConfig &sc = cfg.slots[cfg_slots[i]];
-                    mat3 H = measured_H(sc.hb2i, f.width, f.height, px_per_m, canvas_w, canvas_h,
-                                        p.cam_x - sc.cam_x,
-                                        p.cam_y - sc.cam_y,
-                                        p.yaw   - sc.yaw);
+                    mat3 H = measured_H(cfg.slots[cfg_slots[i]], px_per_m, canvas_w, canvas_h);
                     char label[16];
                     std::snprintf(label, sizeof(label), "slot%d", cfg_slots[i] + 1);
                     ipm_debug_check(H, canvas_w, canvas_h, label);
@@ -821,7 +781,7 @@ static int run_multi_file_mode(const std::vector<std::string> &paths,
                                        "anywhere its own homography is valid"
                                      : "back to facing-sector-limited blending");
             } else if (key == 'W') {
-                BevConfig save_cfg   = cfg; // keeps has_hb2i/hb2i + any slot not currently loaded untouched
+                BevConfig save_cfg   = cfg;
                 save_cfg.px_per_m    = px_per_m;
                 save_cfg.overlap_deg = overlap_deg;
                 save_cfg.blend_edge  = blend_edge;
@@ -829,19 +789,6 @@ static int run_multi_file_mode(const std::vector<std::string> &paths,
                 save_cfg.car_y       = car_y_m;
                 save_cfg.car_width   = car_width_m;
                 save_cfg.car_length  = car_length_m;
-                for (int i = 0; i < n; ++i) {
-                    const SlotParams &p = slots[i].params;
-                    BevSlotConfig    &s = save_cfg.slots[cfg_slots[i]];
-                    // cam_x/cam_y/yaw stay the fixed calibration-time baseline
-                    // (read before being overwritten below) -- only the delta
-                    // from it is saved, or a tuned offset would silently
-                    // reset to 0 on the next load (see cam_x_delta's comment).
-                    s.cam_x_delta = p.cam_x - s.cam_x;
-                    s.cam_y_delta = p.cam_y - s.cam_y;
-                    s.yaw_delta   = p.yaw   - s.yaw;
-                    s.cam_h = p.cam_h;
-                    s.pitch = p.pitch;
-                }
                 if (bev_config_save(config_path, save_cfg)) {
                     cfg = save_cfg;
                     std::printf("[multi] saved current values as defaults -> %s\n",
@@ -885,48 +832,6 @@ static int run_multi_file_mode(const std::vector<std::string> &paths,
                 } else {
                     std::printf("[multi] slot %d doesn't exist (only %d loaded)\n", idx + 1, n);
                 }
-            } else if (key == 'H') {
-                slots[active_slot].params.cam_h = std::min(slots[active_slot].params.cam_h + 0.05, 3.0);
-                rebuild_slot(active_slot, "height+");
-                if (cfg.slots[cfg_slots[active_slot]].has_hb2i)
-                    std::printf("[multi] note: cam_h is baked into slot %d's calibrated "
-                                "homography and has no visual effect here\n", cfg_slots[active_slot] + 1);
-            } else if (key == 'h') {
-                slots[active_slot].params.cam_h = std::max(slots[active_slot].params.cam_h - 0.05, 0.2);
-                rebuild_slot(active_slot, "height-");
-                if (cfg.slots[cfg_slots[active_slot]].has_hb2i)
-                    std::printf("[multi] note: cam_h is baked into slot %d's calibrated "
-                                "homography and has no visual effect here\n", cfg_slots[active_slot] + 1);
-            } else if (key == 'P') {
-                slots[active_slot].params.pitch = std::min(slots[active_slot].params.pitch + 1.0, -1.0);
-                rebuild_slot(active_slot, "pitch+");
-                if (cfg.slots[cfg_slots[active_slot]].has_hb2i)
-                    std::printf("[multi] note: pitch is baked into slot %d's calibrated "
-                                "homography and has no visual effect here\n", cfg_slots[active_slot] + 1);
-            } else if (key == 'p') {
-                slots[active_slot].params.pitch = std::max(slots[active_slot].params.pitch - 1.0, -89.0);
-                rebuild_slot(active_slot, "pitch-");
-                if (cfg.slots[cfg_slots[active_slot]].has_hb2i)
-                    std::printf("[multi] note: pitch is baked into slot %d's calibrated "
-                                "homography and has no visual effect here\n", cfg_slots[active_slot] + 1);
-            } else if (key == 'Y') {
-                slots[active_slot].params.yaw = std::fmod(slots[active_slot].params.yaw + 1.0, 360.0);
-                rebuild_slot(active_slot, "yaw+");
-            } else if (key == 'y') {
-                slots[active_slot].params.yaw = std::fmod(slots[active_slot].params.yaw - 1.0 + 360.0, 360.0);
-                rebuild_slot(active_slot, "yaw-");
-            } else if (key == 'G') {
-                slots[active_slot].params.cam_y = std::min(slots[active_slot].params.cam_y + 0.05, 5.0);
-                rebuild_slot(active_slot, "cam_y+");
-            } else if (key == 'g') {
-                slots[active_slot].params.cam_y = std::max(slots[active_slot].params.cam_y - 0.05, -5.0);
-                rebuild_slot(active_slot, "cam_y-");
-            } else if (key == 'X') {
-                slots[active_slot].params.cam_x = std::min(slots[active_slot].params.cam_x + 0.05, 5.0);
-                rebuild_slot(active_slot, "cam_x+");
-            } else if (key == 'x') {
-                slots[active_slot].params.cam_x = std::max(slots[active_slot].params.cam_x - 0.05, -30.0);
-                rebuild_slot(active_slot, "cam_x-");
             } else if (key == 'B') {
                 car_x_m = std::min(car_x_m + 0.05, 5.0);
                 renderer.set_car_center((float)car_x_m, (float)car_y_m);

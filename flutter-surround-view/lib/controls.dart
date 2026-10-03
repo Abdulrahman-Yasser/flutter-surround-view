@@ -18,9 +18,8 @@ class TopToolbar extends StatelessWidget {
     required this.frontRearCamera,
     required this.onFrontRearTap,
     required this.overlays,
-    required this.calibrating,
     required this.onToggleOverlay,
-    required this.onToggleCalibrate,
+    required this.onCalibrate,
     required this.onSnapshot,
     required this.onSettings,
     this.backendConnected = false,
@@ -34,9 +33,8 @@ class TopToolbar extends StatelessWidget {
   final CameraId frontRearCamera;
   final VoidCallback onFrontRearTap;
   final Set<CameraOverlay> overlays;
-  final bool calibrating;
   final ValueChanged<CameraOverlay> onToggleOverlay;
-  final VoidCallback onToggleCalibrate;
+  final VoidCallback onCalibrate;
   final VoidCallback onSnapshot;
   final VoidCallback onSettings;
   final bool backendConnected;
@@ -134,9 +132,8 @@ class TopToolbar extends StatelessWidget {
           const SizedBox(width: 6),
           _QuickActionsMenu(
             overlays: overlays,
-            calibrating: calibrating,
             onToggleOverlay: onToggleOverlay,
-            onToggleCalibrate: onToggleCalibrate,
+            onCalibrate: onCalibrate,
             onSnapshot: onSnapshot,
           ),
           const SizedBox(width: 6),
@@ -201,16 +198,14 @@ class _ToolbarButton extends StatelessWidget {
 class _QuickActionsMenu extends StatelessWidget {
   const _QuickActionsMenu({
     required this.overlays,
-    required this.calibrating,
     required this.onToggleOverlay,
-    required this.onToggleCalibrate,
+    required this.onCalibrate,
     required this.onSnapshot,
   });
 
   final Set<CameraOverlay> overlays;
-  final bool calibrating;
   final ValueChanged<CameraOverlay> onToggleOverlay;
-  final VoidCallback onToggleCalibrate;
+  final VoidCallback onCalibrate;
   final VoidCallback onSnapshot;
 
   @override
@@ -229,10 +224,9 @@ class _QuickActionsMenu extends StatelessWidget {
           checked: overlays.contains(CameraOverlay.distanceGrid),
           child: const Text('Distance grid'),
         ),
-        CheckedPopupMenuItem<_QuickAction>(
+        const PopupMenuItem<_QuickAction>(
           value: _QuickAction.calibrate,
-          checked: calibrating,
-          child: const Text('Calibrate'),
+          child: Text('Calibrate'),
         ),
         const PopupMenuItem<_QuickAction>(
           value: _QuickAction.snapshot,
@@ -246,7 +240,7 @@ class _QuickActionsMenu extends StatelessWidget {
           case _QuickAction.distanceGrid:
             onToggleOverlay(CameraOverlay.distanceGrid);
           case _QuickAction.calibrate:
-            onToggleCalibrate();
+            onCalibrate();
           case _QuickAction.snapshot:
             onSnapshot();
         }
@@ -296,190 +290,6 @@ class _BackendPill extends StatelessWidget {
             style: const TextStyle(color: Colors.white54, fontSize: 11),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class CalibrationPanel extends StatelessWidget {
-  const CalibrationPanel({
-    super.key,
-    required this.camera,
-    required this.delta,
-    required this.onSelectCamera,
-    required this.onNudge,
-    required this.onSave,
-    required this.onReset,
-  });
-
-  final CameraId camera;
-  final CalDelta delta;
-  final ValueChanged<CameraId> onSelectCamera;
-  final void Function(CalAxis axis, int sign) onNudge;
-  final VoidCallback onSave;
-  final VoidCallback onReset;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 268,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1B1B21),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const Text(
-            'Calibration',
-            style: TextStyle(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 4,
-            runSpacing: 4,
-            children: <Widget>[
-              for (final CameraId c in CameraId.values)
-                _CamChip(
-                  label: c.label,
-                  selected: c == camera,
-                  onTap: () => onSelectCamera(c),
-                ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _NudgeRow(
-            label: 'X',
-            onMinus: () => onNudge(CalAxis.x, -1),
-            onPlus: () => onNudge(CalAxis.x, 1),
-          ),
-          _NudgeRow(
-            label: 'Y',
-            onMinus: () => onNudge(CalAxis.y, -1),
-            onPlus: () => onNudge(CalAxis.y, 1),
-          ),
-          _NudgeRow(
-            label: 'Yaw',
-            onMinus: () => onNudge(CalAxis.yaw, -1),
-            onPlus: () => onNudge(CalAxis.yaw, 1),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'x ${delta.x.toStringAsFixed(1)}   '
-            'y ${delta.y.toStringAsFixed(1)}   '
-            'yaw ${delta.yaw.toStringAsFixed(1)}°',
-            style: const TextStyle(color: Colors.white54, fontSize: 11),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: FilledButton(
-                  onPressed: onSave,
-                  child: const Text('Save'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: onReset,
-                  child: const Text('Reset'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CamChip extends StatelessWidget {
-  const _CamChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: selected ? _accent : Colors.white10,
-      borderRadius: BorderRadius.circular(6),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(6),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              color: selected ? Colors.white : Colors.white70,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _NudgeRow extends StatelessWidget {
-  const _NudgeRow({
-    required this.label,
-    required this.onMinus,
-    required this.onPlus,
-  });
-
-  final String label;
-  final VoidCallback onMinus;
-  final VoidCallback onPlus;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: <Widget>[
-          SizedBox(
-            width: 40,
-            child: Text(label, style: const TextStyle(color: Colors.white70)),
-          ),
-          _SquareBtn(icon: Icons.remove, onTap: onMinus),
-          const SizedBox(width: 6),
-          _SquareBtn(icon: Icons.add, onTap: onPlus),
-        ],
-      ),
-    );
-  }
-}
-
-class _SquareBtn extends StatelessWidget {
-  const _SquareBtn({required this.icon, required this.onTap});
-
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white10,
-      borderRadius: BorderRadius.circular(6),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(6),
-        onTap: onTap,
-        child: SizedBox(
-          width: 34,
-          height: 30,
-          child: Center(child: Icon(icon, size: 18)),
-        ),
       ),
     );
   }

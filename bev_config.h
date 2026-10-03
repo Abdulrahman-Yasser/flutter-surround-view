@@ -6,10 +6,10 @@
 
 // On-disk defaults for the --src multi-camera BEV path: per-slot starting
 // pose (mirrors main.cpp's SlotParams) plus an optional measured ChArUco
-// board->image homography for that slot, and the global blend/scale
+// car-frame->image homography for that slot, and the global blend/scale
 // tunables. Lets camera-rig geometry and calibration survive across runs
-// (and rebuilds) without editing source, and be overwritten from live-tuned
-// values at runtime via bev_config_save().
+// (and rebuilds) without editing source. Written by the calibration library
+// (calib/) and by 'W' at runtime via bev_config_save().
 struct BevSlotConfig {
     double cam_x = 0.0, cam_y = 0.0, cam_h = 1.2, pitch = -30.0, yaw = 0.0;
     // Canvas coverage-wedge center, degrees (world atan2(Y,X) bearing: front
@@ -24,17 +24,10 @@ struct BevSlotConfig {
     // bev_config_load().
     double facing_deg = 90.0; // default: front
     bool   has_hb2i = false;
-    mat3   hb2i; // board-metre -> image-pixel; valid only if has_hb2i
-
-    // Live-tuned (X/x, G/g, Y/y) offset from cam_x/cam_y/yaw above, for a
-    // has_hb2i slot -- see main.cpp's measured_H() comment. cam_x/cam_y/yaw
-    // stay the fixed pose the ChArUco shot was taken at (never overwritten by
-    // 'W' save) so the delta these three store is exactly the correction
-    // main.cpp needs to reproduce; if 'W' instead overwrote cam_x/cam_y/yaw
-    // directly, the delta would recompute to 0 on the next load and silently
-    // discard whatever offset had been tuned in, even though the raw numbers
-    // still landed correctly in the file.
-    double cam_x_delta = 0.0, cam_y_delta = 0.0, yaw_delta = 0.0;
+    mat3   hb2i; // car-frame metres -> undistorted image pixels; valid only if has_hb2i
+    // The image size hb2i's pixels are in (the calibration still's), so it
+    // can be normalized for whatever resolution the cameras stream at.
+    int    hb2i_w = 0, hb2i_h = 0;
 
     // Which lens this slot uses, looked up by naming convention as
     // "<lens_dir>/<lens_model>-lens.ini" (see lens_calib_load() and
@@ -51,8 +44,7 @@ struct BevSlotConfig {
     // has_distortion is true. fx/fy/cx/cy are in pixel units at
     // lens_calib_w x lens_calib_h (the resolution they were measured at --
     // main.cpp rescales+normalizes them for whatever resolution the actual
-    // video turns out to be, same idea as measured_H()'s CAL_W/CAL_H
-    // rescale for hb2i). k1/k2/k3 (radial) and p1/p2 (tangential) follow the
+    // video turns out to be, same idea as hb2i_w/hb2i_h). k1/k2/k3 (radial) and p1/p2 (tangential) follow the
     // standard OpenCV distortion-model convention, matching
     // scripts/calibrate_intrinsics.py's own dist-coefficient ordering.
     double fx = 0.0, fy = 0.0, cx = 0.0, cy = 0.0;
@@ -65,10 +57,10 @@ struct BevConfig {
     static constexpr int kMaxSlots = 4;
     // Ground-sampling density: canvas width in px / px_per_m = real-world
     // meters spanned by the BEV output. Needs rechecking any time the
-    // Hb2i matrices or CAL_W/CAL_H (main.cpp) change -- the old 4000, tuned
+    // Hb2i matrices change -- the old 4000, tuned
     // for a previous calibration, made each camera sample only a sliver of
     // its own frame (camA u=[0.71,1.0], camB u=[0.0,0.41]) stretched across
-    // most of the canvas once the new Hb2i/CAL_W/CAL_H took over (the
+    // most of the canvas once the new Hb2i took over (the
     // "both videos on the right" symptom). 2200 was confirmed (coverage-map
     // scan of the current kHb2i_A/kHb2i_B at 1640x1232) as the smallest
     // value giving 100% canvas coverage with no black gaps, while each
@@ -140,3 +132,7 @@ bool bev_config_save(const std::string &path, const BevConfig &cfg);
 // (missing required key, bad number) -- that case is a real bug worth
 // surfacing, unlike a simply-absent file.
 bool lens_calib_load(const std::string &path, BevSlotConfig &slot);
+
+// Accepts a cardinal keyword (front/back/left/right, case-insensitive) or a
+// raw degree number -- same bearing convention as BevSlotConfig::facing_deg.
+bool parse_facing(const std::string &val, double &out);

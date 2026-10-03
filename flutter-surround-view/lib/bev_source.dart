@@ -1,6 +1,10 @@
 import 'dart:io';
 
+import 'package:bev_calib/bev_calib.dart';
 import 'package:bev_view/bev_view.dart';
+
+// Shared with the calibration screens, so the view reads what they save.
+final CalibPaths calibPaths = CalibPaths.fromEnvironment();
 
 BevSource surroundSourceFromEnvironment() {
   final Map<String, String> env = Platform.environment;
@@ -12,8 +16,8 @@ BevSource surroundSourceFromEnvironment() {
   final int cameras = int.tryParse(get('BEV_CAMERAS') ?? '') ?? 2;
   return BevSurroundSource(
     <String>[for (int i = 0; i < cameras; i++) 'camera:$i'],
-    config: get('BEV_CONFIG') ?? 'bev_config.ini',
-    lensDir: get('BEV_LENS_DIR'),
+    config: calibPaths.configPath,
+    lensDir: calibPaths.lensDir,
     pxPerMeter: double.tryParse(get('BEV_PX_PER_M') ?? ''),
     fps: double.tryParse(get('BEV_CAM_FPS') ?? '') ?? 30,
     width: int.tryParse(get('BEV_WIDTH') ?? ''),
@@ -40,8 +44,8 @@ BevSource birdsEyeSourceFromEnvironment(int index) {
 
   return BevSurroundSource(
     <String>['camera:$index'],
-    config: get('BEV_CONFIG') ?? 'bev_config.ini',
-    lensDir: get('BEV_LENS_DIR'),
+    config: calibPaths.configPath,
+    lensDir: calibPaths.lensDir,
     pxPerMeter: double.tryParse(get('BEV_PX_PER_M') ?? ''),
     fps: double.tryParse(get('BEV_CAM_FPS') ?? '') ?? 30,
     width: int.tryParse(get('BEV_WIDTH') ?? ''),

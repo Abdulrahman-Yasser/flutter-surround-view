@@ -1,0 +1,318 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:isolate';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+
+import '../calibration.dart';
+import '../ffi/bev_calib_ffi.dart';
+import '../paths.dart';
+
+const _panel = Color(0xFF1B1B21);
+const _good = Color(0xFF43C46B);
+const _warn = Color(0xFFFFB224);
+const _bad = Color(0xFFE5484D);
+
+/// Lens calibration for one camera: hold the board at many poses, keep the
+/// good frames, then fit and save `<lens_dir>/<lens>-lens.ini`.
+class LensCalibrationPage extends StatefulWidget {
+  const LensCalibrationPage({super.key, required this.paths, this.board = const BoardSpec()});
+
+  final CalibPaths paths;
+  final BoardSpec board;
+
+  @override
+  State<LensCalibrationPage> createState() => _LensCalibrationPageState();
+}
+
+class _LensCalibrationPageState extends State<LensCalibrationPage> {
+  static const _recommendedViews = 15;
+
+  int? _cameras;
+  int _camera = 0;
+  final _lens = TextEditingController(text: 'imx219');
+  late final _squares = TextEditingController(text: '${widget.board.squaresX}x${widget.board.squaresY}');
+  late final _square = TextEditingController(text: (widget.board.squareLen * 1000).toStringAsFixed(0));
+  late final _marker = TextEditingController(text: (widget.board.markerLen * 1000).toStringAsFixed(0));
+  late final _dict = TextEditingController(text: widget.board.dict);
+
+  IntrinsicsSession? _session;
+  bool _running = false;
+  Future<void>? _loop;
+  Uint8List? _frame;
+  IntrinsicsStatus? _status;
+  IntrinsicsResult? _result;
+  String? _busy;
+  String? _error;
+
+  String get _previewPath => '${widget.paths.workDir}/lens-preview.jpg';
+
+  @override
+  void initState() {
+    super.initState();
+    Isolate.run(bev_calib_cameras_present).then((n) {
+      if (mounted) setState(() => _cameras = n);
+    });
+  }
+
+  @override
+  void dispose() {
+    _stop();
+    for (final c in [_lens, _squares, _square, _marker, _dict]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  BoardSpec? _boardFromFields() {
+    final sq = _squares.text.toLowerCase().split('x');
+    final sx = sq.length == 2 ? int.tryParse(sq[0].trim()) : null;
+    final sy = sq.length == 2 ? int.tryParse(sq[1].trim()) : null;
+    final square = double.tryParse(_square.text);
+    final marker = double.tryParse(_marker.text);
+    if (sx == null || sy == null || square == null || marker == null || marker >= square) return null;
+    return BoardSpec(
+      dict: _dict.text.trim(),
+      squaresX: sx,
+      squaresY: sy,
+      squareLen: square / 1000,
+      markerLen: marker / 1000,
+      legacy: widget.board.legacy,
+    );
+  }
+
+  Future<void> _start() async {
+    final board = _boardFromFields();
+    if (board == null) {
+      _toast('Check the board fields');
+      return;
+    }
+    if (_lens.text.trim().isEmpty) {
+      _toast('Name the lens, e.g. imx219');
+      return;
+    }
+    setState(() {
+      _busy = 'Opening camera $_camera';
+      _error = null;
+      _result = null;
+    });
+    try {
+      await Directory(widget.paths.workDir).create(recursive: true);
+      _session = await IntrinsicsSession.open(_camera, board);
+      _running = true;
+      _loop = _grabLoop();
+    } on CalibrationException catch (e) {
+      _error = e.message;
+    }
+    if (mounted) setState(() => _busy = null);
+  }
+
+  Future<void> _grabLoop() async {
+    final s = _session!;
+    while (_running) {
+      try {
+        final st = await s.grab(_previewPath);
+        final bytes = await File(_previewPath).readAsBytes();
+        if (!mounted || !_running) break;
+        setState(() {
+          _status = st;
+          _frame = bytes;
+        });
+      } on CalibrationException catch (e) {
+        if (mounted) setState(() => _error = e.message);
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+    }
+  }
+
+  Future<void> _stop() async {
+    _running = false;
+    final s = _session;
+    _session = null;
+    await _loop;
+    await s?.close();
+  }
+
+  Future<void> _add() async {
+    try {
+      final n = await _session!.add();
+      setState(() => _status = IntrinsicsStatus(0, false, n, _status?.width ?? 0, _status?.height ?? 0));
+    } on CalibrationException catch (e) {
+      _toast('$e');
+    }
+  }
+
+  Future<void> _calibrate() async {
+    setState(() => _busy = 'Fitting the lens model');
+    try {
+      final r = await _session!.calibrate();
+      setState(() => _result = r);
+    } on CalibrationException catch (e) {
+      _toast('$e');
+    }
+    setState(() => _busy = null);
+  }
+
+  void _save() {
+    final path = '${widget.paths.lensDir}/${_lens.text.trim()}-lens.ini';
+    try {
+      Directory(widget.paths.lensDir).createSync(recursive: true);
+      _session!.save(path);
+      _toast('Saved $path');
+    } on CalibrationException catch (e) {
+      _toast('Save failed: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Lens calibration'), backgroundColor: _panel),
+      body: SafeArea(
+        child: Stack(children: [
+          Positioned.fill(
+            child: Row(children: [
+              Expanded(
+                child: ColoredBox(
+                  color: Colors.black,
+                  child: _frame == null
+                      ? Center(
+                          child: Text(_session == null ? 'Pick a camera and start' : 'Waiting for frames',
+                              style: const TextStyle(color: Colors.white54)),
+                        )
+                      : Image.memory(_frame!, gaplessPlayback: true, fit: BoxFit.contain),
+                ),
+              ),
+              SizedBox(width: 300, child: _panelContent()),
+            ]),
+          ),
+          if (_busy != null)
+            Positioned.fill(
+              child: ColoredBox(
+                color: Colors.black54,
+                child: Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 12),
+                    Text(_busy!),
+                  ]),
+                ),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _field(String label, TextEditingController c, {bool enabled = true}) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: TextField(
+          controller: c,
+          enabled: enabled,
+          decoration: InputDecoration(labelText: label, isDense: true, border: const OutlineInputBorder()),
+        ),
+      );
+
+  Widget _panelContent() {
+    const small = TextStyle(color: Colors.white70, fontSize: 12);
+    final live = _session != null;
+    final st = _status;
+    final views = st?.views ?? 0;
+    final r = _result;
+    return Container(
+      color: _panel,
+      padding: const EdgeInsets.all(12),
+      child: ListView(children: [
+        if (!live) ...[
+          DropdownButtonFormField<int>(
+            initialValue: _camera,
+            decoration: const InputDecoration(labelText: 'Camera', isDense: true, border: OutlineInputBorder()),
+            items: [
+              for (var i = 0; i < ((_cameras ?? 0) > 0 ? _cameras! : 1); i++)
+                DropdownMenuItem(value: i, child: Text('Camera $i')),
+            ],
+            onChanged: (v) => setState(() => _camera = v ?? 0),
+          ),
+          if (_cameras == 0) const Text('No camera found', style: TextStyle(color: _bad, fontSize: 12)),
+          const SizedBox(height: 6),
+          _field('Lens name (file <name>-lens.ini)', _lens),
+          _field('Board squares (cols x rows)', _squares),
+          Row(children: [
+            Expanded(child: _field('Square mm', _square)),
+            const SizedBox(width: 6),
+            Expanded(child: _field('Marker mm', _marker)),
+          ]),
+          _field('ArUco dictionary', _dict),
+          FilledButton.icon(onPressed: _start, icon: const Icon(Icons.play_arrow), label: const Text('Start')),
+          if (_error != null) Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_error!, style: const TextStyle(color: _bad, fontSize: 12)),
+          ),
+        ] else ...[
+          Text('Camera $_camera · ${_lens.text.trim()}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          if (st != null) ...[
+            Text('${st.width}x${st.height}', style: small),
+            const SizedBox(height: 6),
+            Text(
+              st.usable ? '${st.corners} corners, good' : (st.corners > 0 ? '${st.corners} corners, not enough spread' : 'Board not found'),
+              style: TextStyle(color: st.usable ? _good : _warn, fontSize: 13),
+            ),
+          ],
+          const SizedBox(height: 6),
+          LinearProgressIndicator(value: (views / _recommendedViews).clamp(0.0, 1.0)),
+          Text('$views views kept (aim for $_recommendedViews+)', style: small),
+          const SizedBox(height: 6),
+          const Text(
+            'Fill the frame with different poses: near and far, tilted, and in every corner '
+            'and edge. Orange dots show where earlier views covered.',
+            style: small,
+          ),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: st?.usable == true ? _add : null,
+            icon: const Icon(Icons.add_a_photo),
+            label: const Text('Keep this view'),
+          ),
+          const SizedBox(height: 6),
+          OutlinedButton(onPressed: views >= 3 ? _calibrate : null, child: const Text('Calibrate')),
+          if (r != null) ...[
+            const Divider(),
+            Text('${r.views} views · rms ${r.rmsPx.toStringAsFixed(3)} px',
+                style: TextStyle(color: r.rmsPx < 0.5 ? _good : (r.rmsPx < 1 ? _warn : _bad))),
+            Text('worst view ${r.worstViewPx.toStringAsFixed(2)} px', style: small),
+            Text('fx ${r.fx.toStringAsFixed(1)}  fy ${r.fy.toStringAsFixed(1)}', style: small),
+            Text('cx ${r.cx.toStringAsFixed(1)}  cy ${r.cy.toStringAsFixed(1)}', style: small),
+            Text('k1 ${r.dist[0].toStringAsFixed(4)}  k2 ${r.dist[1].toStringAsFixed(4)}  k3 ${r.dist[4].toStringAsFixed(4)}',
+                style: small),
+            Text('p1 ${r.dist[2].toStringAsFixed(5)}  p2 ${r.dist[3].toStringAsFixed(5)}', style: small),
+            const SizedBox(height: 6),
+            FilledButton.icon(onPressed: _save, icon: const Icon(Icons.save), label: const Text('Save lens file')),
+            Text('${widget.paths.lensDir}/${_lens.text.trim()}-lens.ini', style: small),
+          ],
+          const SizedBox(height: 10),
+          TextButton(
+            onPressed: () async {
+              setState(() => _busy = 'Stopping camera');
+              await _stop();
+              if (mounted) {
+                setState(() {
+                  _busy = null;
+                  _frame = null;
+                  _status = null;
+                });
+              }
+            },
+            child: const Text('Stop camera'),
+          ),
+        ],
+      ]),
+    );
+  }
+}

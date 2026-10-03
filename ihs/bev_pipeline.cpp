@@ -1,10 +1,14 @@
 #include "bev_pipeline.h"
 
 #include "bev_setup.h"
+#include "bev_view_api.h"
 #include "ipm.h"
 #include "perf_timer.h"
 
+#include <dlfcn.h>
+
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -16,6 +20,20 @@ using namespace libcamera;
 namespace {
 
 // One CameraManager for the process, alive while any view holds it.
+std::atomic<int> g_camera_managers{0};
+
+// libbev_calib.so is dlopen'ed RTLD_LOCAL by the Dart runtime, so its symbols
+// are only reachable through its own handle. RTLD_NOLOAD never loads it.
+bool calib_library_has_cameras()
+{
+    void *h = dlopen("libbev_calib.so", RTLD_NOW | RTLD_NOLOAD);
+    if (!h) return false;
+    auto active = reinterpret_cast<int32_t (*)()>(dlsym(h, "bev_calib_camera_active"));
+    const bool busy = active && active();
+    dlclose(h);
+    return busy;
+}
+
 std::shared_ptr<CameraManager> acquire_camera_manager(const std::string &tuning_file)
 {
     static std::mutex                 mutex;
@@ -32,14 +50,26 @@ std::shared_ptr<CameraManager> acquire_camera_manager(const std::string &tuning_
     // mechanism as the CLI's --tuning-file.
     if (!tuning_file.empty()) setenv("LIBCAMERA_RPI_TUNING_FILE", tuning_file.c_str(), 1);
 
+    // A second CameraManager aborts the process, and the calibration screen
+    // may still be closing its own.
+    for (int i = 0; calib_library_has_cameras(); ++i) {
+        if (i == 100) {
+            std::fprintf(stderr, "[bev/camera] the calibration library still holds the cameras\n");
+            return nullptr;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
     auto cm = std::make_unique<CameraManager>();
     if (cm->start()) {
         std::fprintf(stderr, "[bev/camera] CameraManager::start failed\n");
         return nullptr;
     }
+    ++g_camera_managers;
     std::shared_ptr<CameraManager> started(cm.release(), [](CameraManager *c) {
         c->stop();
         delete c;
+        --g_camera_managers;
     });
     shared = started;
     return started;
@@ -57,6 +87,11 @@ bool acquire_camera(libcamera::Camera &camera)
 }
 
 } // namespace
+
+extern "C" BEV_EXPORT int32_t bev_camera_manager_active(void)
+{
+    return g_camera_managers.load() > 0;
+}
 
 bool BevPipeline::init(const EGLState &egl, const BevParams &params)
 {
@@ -314,7 +349,7 @@ bool BevPipeline::init_surround()
         const int s = params_.cfg_slots[(size_t)i];
         if (s < 0 || s >= BevConfig::kMaxSlots || !cfg.slots[s].has_hb2i) {
             std::fprintf(stderr, "[bev/surround] source %d (%s) maps to config slot %d, which has "
-                                 "no hb2i in %s -- calibrate it with calibrate_bev.py first\n",
+                                 "no hb2i in %s -- calibrate it from the app's calibration screen first\n",
                          i, params_.sources[(size_t)i].c_str(), s, params_.config_path.c_str());
             return false;
         }
@@ -419,10 +454,7 @@ bool BevPipeline::init_surround()
             renderer_->set_distortion_multi(i, sc.has_distortion, fxn, fyn, cxn, cyn,
                 (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)sc.p1, (float)sc.p2);
 
-        // The saved deltas are exactly the live pose's offset from the
-        // calibration pose that main.cpp's rebuild_slot() computes.
-        mat3 H = measured_H(sc.hb2i, slot.width, slot.height, px_per_m, canvas_w, canvas_h,
-                            sc.cam_x_delta, sc.cam_y_delta, sc.yaw_delta);
+        mat3 H = measured_H(sc, px_per_m, canvas_w, canvas_h);
         float Hf[9];
         H.to_floats(Hf);
         if (pyramid_) renderer_->set_ipm_multi_pyramid(i, Hf, (float)sc.facing_deg);

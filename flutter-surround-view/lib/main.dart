@@ -1,5 +1,7 @@
+import 'package:bev_calib/bev_calib.dart';
 import 'package:flutter/material.dart';
 
+import 'bev_source.dart';
 import 'controls.dart';
 import 'models.dart';
 import 'settings_page.dart';
@@ -52,11 +54,7 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
     for (final CameraId c in CameraId.values) c: CameraSubView.normal,
   };
   final Set<CameraOverlay> _overlays = <CameraOverlay>{};
-  bool _calibrating = false;
-  CameraId _calibCamera = CameraId.front;
-  final Map<CameraId, CalDelta> _deltas = <CameraId, CalDelta>{
-    for (final CameraId c in CameraId.values) c: CalDelta(),
-  };
+  bool _suspended = false;
 
   void _toast(String message) {
     ScaffoldMessenger.of(context)
@@ -120,30 +118,36 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
         if (!_overlays.remove(o)) _overlays.add(o);
       });
 
-  void _nudge(CalAxis axis, int sign) => setState(() {
-        final CalDelta d = _deltas[_calibCamera]!;
-        switch (axis) {
-          case CalAxis.x:
-            d.x += sign * 1.0;
-          case CalAxis.y:
-            d.y += sign * 1.0;
-          case CalAxis.yaw:
-            d.yaw += sign * 0.5;
-        }
-      });
+  // Calibration needs the cameras, which a live BevView holds. A pushed route
+  // keeps this screen mounted, so first build a frame with no view at all,
+  // then open the page; the views come back (with the new calibration) on
+  // return.
+  Future<void> _openCalibration(Widget Function(CalibPaths paths) page) async {
+    if (_suspended) return;
+    setState(() => _suspended = true);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    final bool? saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(builder: (BuildContext context) => page(calibPaths)),
+    );
+    if (!mounted) return;
+    setState(() => _suspended = false);
+    if (saved == true) _toast('Calibration saved');
+  }
+
+  void _openSurroundCalibration() =>
+      _openCalibration((CalibPaths paths) => SurroundCalibrationPage(paths: paths));
+
+  void _openLensCalibration() =>
+      _openCalibration((CalibPaths paths) => LensCalibrationPage(paths: paths));
 
   void _openSettings() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => SettingsPage(
-          initialDeltas: _deltas,
-          onSave: (CameraId camera, CalDelta delta) => setState(() {
-            _deltas[camera] = delta;
-            _toast('Calibration saved for ${camera.label} (mock)');
-          }),
-          onReset: (CameraId camera) => setState(() {
-            _deltas[camera] = CalDelta();
-          }),
+          paths: calibPaths,
+          onSurroundCalibration: _openSurroundCalibration,
+          onLensCalibration: _openLensCalibration,
         ),
       ),
     );
@@ -185,30 +189,15 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
           top: 10,
           child: _ModeTag(label: _modeTagLabel()),
         ),
-        if (_calibrating)
-          Positioned(
-            left: 10,
-            bottom: 10,
-            child: CalibrationPanel(
-              camera: _calibCamera,
-              delta: _deltas[_calibCamera]!,
-              onSelectCamera: (CameraId c) =>
-                  setState(() => _calibCamera = c),
-              onNudge: _nudge,
-              onSave: () => _toast(
-                'Calibration saved for '
-                '${_calibCamera.label} (mock)',
-              ),
-              onReset: () =>
-                  setState(() => _deltas[_calibCamera] = CalDelta()),
-            ),
-          ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_suspended) {
+      return const Scaffold(backgroundColor: Color(0xFF0A0A0C));
+    }
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -238,10 +227,8 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
               frontRearCamera: _frontRearCamera,
               onFrontRearTap: _frontRearTap,
               overlays: _overlays,
-              calibrating: _calibrating,
               onToggleOverlay: _toggleOverlay,
-              onToggleCalibrate: () =>
-                  setState(() => _calibrating = !_calibrating),
+              onCalibrate: _openSurroundCalibration,
               onSnapshot: () => _toast('Snapshot saved (mock)'),
               onSettings: _openSettings,
             ),
