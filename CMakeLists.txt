@@ -191,7 +191,10 @@ if (ENABLE_IHS_PV)
     # -- ihs_pv: libihs_shared and the ihs/ ABI headers -----------------------
     # Either an ivi-homescreen checkout (IHS_DIR, with its build under
     # IHS_BUILD_DIR) or an installed ivi-homescreen-shared package.
-    if (NOT IHS_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../ivi-homescreen/shared/include/ihs/platform_view.h")
+    # An AGL SDK build turns this off: the sibling checkout would win over the
+    # sysroot's ivi-homescreen-shared package.
+    option(IHS_PROBE_SIBLING "Use a ../ivi-homescreen checkout when IHS_DIR is unset" ON)
+    if (IHS_PROBE_SIBLING AND NOT IHS_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../ivi-homescreen/shared/include/ihs/platform_view.h")
         get_filename_component(IHS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ivi-homescreen" ABSOLUTE)
     endif ()
 
