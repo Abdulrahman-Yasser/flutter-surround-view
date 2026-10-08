@@ -250,6 +250,23 @@ external int bev_calib_move_point(Pointer<BevCalibSession> s, int cam, int index
 @Native<Int32 Function(Pointer<BevCalibSession>, Int32, Pointer<BevCalibSolve>)>()
 external int bev_calib_solve(Pointer<BevCalibSession> s, int cam, Pointer<BevCalibSolve> out);
 
+@Native<Int32 Function(Pointer<BevCalibSession>, Int32)>()
+external int bev_calib_add_missing(Pointer<BevCalibSession> s, int cam);
+
+@Native<Int32 Function(Pointer<BevCalibSession>, Int32, Int32, Int32, Float, Float)>()
+external int bev_calib_place_point(Pointer<BevCalibSession> s, int cam, int board, int corner, double x, double y);
+
+@Native<Int32 Function(Pointer<BevCalibSession>, Int32)>()
+external int bev_calib_board_corner_count(Pointer<BevCalibSession> s, int board);
+
+@Native<Int32 Function(Pointer<BevCalibSession>, Int32, Int32, Pointer<Double>, Pointer<Double>)>()
+external int bev_calib_board_corner(Pointer<BevCalibSession> s, int board, int corner, Pointer<Double> x,
+    Pointer<Double> y);
+
+@Native<Int32 Function(Pointer<BevCalibSession>, Int32, Int32, Int32, Pointer<Char>, Pointer<Double>, Pointer<Double>)>()
+external int bev_calib_board_reference(Pointer<BevCalibSession> s, int board, int corner, int width,
+    Pointer<Char> pngPath, Pointer<Double> marginM, Pointer<Double> pxPerM);
+
 @Native<Int32 Function(Pointer<BevCalibSession>)>()
 external int bev_calib_seam_count(Pointer<BevCalibSession> s);
 

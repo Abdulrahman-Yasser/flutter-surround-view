@@ -61,6 +61,22 @@ public:
     int detect(int cam);
     const std::vector<CalibPoint> &points(int cam) const;
     void move_point(int cam, int idx, cv::Point2f image_px);
+    // Adds every corner of every board that wasn't detected but lies in the
+    // frame, where the fit so far predicts it, as a guessed point. Needs at
+    // least 4 corners; returns how many were added, or -1.
+    int add_missing(int cam);
+    // Puts board corner `corner` at image_px, by hand: moves its point if it
+    // has one, else adds it. Returns the point's index.
+    int place(int cam, int board, int corner, cv::Point2f image_px);
+
+    // A board's corners in printed-sheet metres (origin top-left, +y down),
+    // indexed by corner id; a square's are its 4 corners clockwise from
+    // top-left.
+    const std::vector<cv::Point2d> &sheet_corners(int board) const { return sheet_.at(board); }
+    // The board as printed, `width` px wide with a white margin, marker ids
+    // written on and corner (if >= 0) marked. margin_m and px_per_m map
+    // sheet metres to its pixels: px = (sheet + margin_m) * px_per_m.
+    cv::Mat board_reference(int board, int corner, int width, double &margin_m, double &px_per_m) const;
 
     bool solve(int cam);
     const CalibSolve &result(int cam) const;
@@ -85,5 +101,6 @@ private:
     CalibLayout layout_;
     std::vector<std::unique_ptr<CharucoModel>> boards_;
     std::vector<std::vector<cv::Point2d>> world_; // per board, per corner id: car frame
+    std::vector<std::vector<cv::Point2d>> sheet_; // the same corners on the printed sheet
     std::vector<Cam> cams_;
 };

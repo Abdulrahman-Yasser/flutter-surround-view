@@ -12,6 +12,7 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <set>
 #include <stdexcept>
 
 struct CalibSession::Cam {
@@ -42,9 +43,9 @@ CalibSession::CalibSession(const CalibLayout &layout, const std::string &lens_di
 {
     for (const CalibBoard &cb : layout_.boards) {
         boards_.push_back(cb.square ? nullptr : std::make_unique<CharucoModel>(cb));
+        sheet_.push_back(cb.square ? square_corners(cb.square_len) : boards_.back()->corners());
         std::vector<cv::Point2d> world;
-        for (const cv::Point2d &p : cb.square ? square_corners(cb.square_len) : boards_.back()->corners())
-            world.push_back(sheet_to_world(cb, p));
+        for (const cv::Point2d &p : sheet_.back()) world.push_back(sheet_to_world(cb, p));
         world_.push_back(std::move(world));
     }
 
@@ -478,6 +479,107 @@ bool CalibSession::find_square(int cam, int board, const cv::Matx33d &H,
     }
     found = true;
     return true;
+}
+
+int CalibSession::add_missing(int cam)
+{
+    Cam &c = cams_.at(cam);
+    cv::Matx33d H;
+    std::vector<bool> in;
+    if (!fit(cam, H, in)) return -1;
+    std::set<std::pair<int, int>> have;
+    for (const CalibPoint &p : c.points) have.insert({p.board, p.corner});
+    const cv::Rect2d frame(0, 0, c.gray.cols, c.gray.rows);
+    int added = 0;
+    for (size_t bi = 0; bi < world_.size(); ++bi) {
+        for (size_t k = 0; k < world_[bi].size(); ++k) {
+            cv::Point2d raw;
+            if (have.count({(int)bi, (int)k}) || !project(c.lens, H, world_[bi][k], raw) || !frame.contains(raw))
+                continue;
+            CalibPoint p;
+            p.board = (int)bi;
+            p.corner = (int)k;
+            p.image = raw;
+            p.world = world_[bi][k];
+            p.guessed = true;
+            c.points.push_back(p);
+            ++added;
+        }
+    }
+    return added;
+}
+
+int CalibSession::place(int cam, int board, int corner, cv::Point2f image_px)
+{
+    Cam &c = cams_.at(cam);
+    if (board < 0 || board >= (int)world_.size() || corner < 0 || corner >= (int)world_[board].size())
+        throw std::out_of_range("no such board corner");
+    for (size_t i = 0; i < c.points.size(); ++i) {
+        if (c.points[i].board == board && c.points[i].corner == corner) {
+            move_point(cam, (int)i, image_px);
+            return (int)i;
+        }
+    }
+    CalibPoint p;
+    p.board = board;
+    p.corner = corner;
+    p.image = image_px;
+    p.world = world_[board][corner];
+    p.moved = true;
+    c.points.push_back(p);
+    return (int)c.points.size() - 1;
+}
+
+cv::Mat CalibSession::board_reference(int board, int corner, int width, double &margin_m, double &px_per_m) const
+{
+    const CalibBoard &b = layout_.boards.at(board);
+    const double w = b.squares_x * b.square_len, h = b.squares_y * b.square_len;
+    margin_m = b.square ? 0.25 * w : 0.6 * b.square_len;
+    px_per_m = width / (w + 2 * margin_m);
+    auto px = [&](cv::Point2d s) { return cv::Point2d((s.x + margin_m) * px_per_m, (s.y + margin_m) * px_per_m); };
+    cv::Mat img((int)std::lround((h + 2 * margin_m) * px_per_m), width, CV_8UC3, cv::Scalar::all(255));
+
+    const cv::Point2d tl = px({0, 0}), br = px({w, h});
+    if (b.square) {
+        cv::rectangle(img, tl, br, cv::Scalar::all(20), cv::FILLED, cv::LINE_AA);
+    } else {
+        const cv::Point at((int)std::lround(tl.x), (int)std::lround(tl.y));
+        const cv::Rect roi(at, cv::Size(std::min((int)std::lround(w * px_per_m), img.cols - at.x),
+                                        std::min((int)std::lround(h * px_per_m), img.rows - at.y)));
+        // Whole pixels per square: OpenCV 4.5's draw() asserts on sizes that
+        // don't divide evenly.
+        cv::Mat gray = boards_[board]->draw({b.squares_x * 100, b.squares_y * 100}), scaled, bgr;
+        cv::resize(gray, scaled, roi.size(), 0, 0, cv::INTER_AREA);
+        cv::cvtColor(scaled, bgr, cv::COLOR_GRAY2BGR);
+        bgr.copyTo(img(roi));
+        const double font = std::max(0.3, b.marker_len * px_per_m / 70);
+        for (const auto &[id, centre] : boards_[board]->marker_centres()) {
+            const std::string text = std::to_string(id);
+            int base = 0;
+            const cv::Size ts = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, font, 1, &base);
+            const cv::Point2d c = px(centre);
+            const cv::Point org((int)(c.x - ts.width / 2), (int)(c.y + ts.height / 2));
+            cv::rectangle(img, org + cv::Point(-2, 2), org + cv::Point(ts.width + 2, -ts.height - 2),
+                          cv::Scalar(255, 255, 255), cv::FILLED);
+            cv::putText(img, text, org, cv::FONT_HERSHEY_SIMPLEX, font, cv::Scalar(0, 110, 230), 1, cv::LINE_AA);
+        }
+    }
+    cv::rectangle(img, tl, br, cv::Scalar(150, 150, 150), 1);
+    // The printed top edge, as on the layout diagram.
+    cv::line(img, tl, cv::Point2d(br.x, tl.y), cv::Scalar(90, 90, 90), 3);
+
+    if (corner >= 0 && corner < (int)sheet_[board].size()) {
+        const cv::Point2d c = px(sheet_[board][corner]);
+        const double cell = b.square ? b.square_len / 8 : b.square_len;
+        const double r = std::max(8.0, cell * px_per_m * 0.45), gap = r * 0.25;
+        const cv::Scalar red(40, 40, 230);
+        cv::line(img, c - cv::Point2d(r, 0), c - cv::Point2d(gap, 0), red, 2, cv::LINE_AA);
+        cv::line(img, c + cv::Point2d(gap, 0), c + cv::Point2d(r, 0), red, 2, cv::LINE_AA);
+        cv::line(img, c - cv::Point2d(0, r), c - cv::Point2d(0, gap), red, 2, cv::LINE_AA);
+        cv::line(img, c + cv::Point2d(0, gap), c + cv::Point2d(0, r), red, 2, cv::LINE_AA);
+        cv::circle(img, c, r, red, 2, cv::LINE_AA);
+    }
+    return img;
 }
 
 bool CalibSession::solve(int cam)

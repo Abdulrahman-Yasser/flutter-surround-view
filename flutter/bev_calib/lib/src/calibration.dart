@@ -2,6 +2,7 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
+import 'dart:ui' show Offset;
 
 import 'package:ffi/ffi.dart';
 
@@ -399,6 +400,42 @@ class CalibrationSession {
   }
 
   void movePoint(int cam, int index, double x, double y) => _check(bev_calib_move_point(_h, cam, index, x, y));
+
+  /// Adds the corners that weren't detected, as guessed points where the
+  /// detected ones predict them. Needs 4 corners first; returns how many.
+  int addMissing(int cam) {
+    final n = bev_calib_add_missing(_h, cam);
+    if (n < 0) throw CalibrationException(_lastError());
+    return n;
+  }
+
+  /// Puts a board corner at (x, y) by hand; returns its point index.
+  int placePoint(int cam, int board, int corner, double x, double y) {
+    final i = bev_calib_place_point(_h, cam, board, corner, x, y);
+    if (i < 0) throw CalibrationException(_lastError());
+    return i;
+  }
+
+  /// A board's corners on the printed sheet, metres from its top-left.
+  List<Offset> boardCorners(int board) {
+    return using((arena) {
+      final x = arena<Double>(), y = arena<Double>();
+      return [
+        for (var i = 0; i < bev_calib_board_corner_count(_h, board); i++)
+          if (bev_calib_board_corner(_h, board, i, x, y) == 1) Offset(x.value, y.value),
+      ];
+    });
+  }
+
+  /// Writes the board as printed with its marker ids and [corner] marked;
+  /// sheet metres map to its pixels as (sheet + margin) * pxPerM.
+  ({double margin, double pxPerM}) boardReference(int board, int corner, int width, String pngPath) {
+    return using((arena) {
+      final m = arena<Double>(), p = arena<Double>();
+      _withString(pngPath, (path) => _check(bev_calib_board_reference(_h, board, corner, width, path, m, p)));
+      return (margin: m.value, pxPerM: p.value);
+    });
+  }
 
   /// Solves [cam]; a camera with too few corners gives [SolveResult.none].
   SolveResult solve(int cam) {

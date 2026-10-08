@@ -130,6 +130,25 @@ BEV_CALIB_EXPORT int32_t bev_calib_point(BevCalibSession *s, int32_t cam, int32_
 BEV_CALIB_EXPORT int32_t bev_calib_move_point(BevCalibSession *s, int32_t cam, int32_t index, float x, float y);
 BEV_CALIB_EXPORT int32_t bev_calib_solve(BevCalibSession *s, int32_t cam, BevCalibSolve *out);
 
+// Adds every undetected corner in the frame as a guessed point where the
+// corners found so far predict it. Returns how many, or -1 (fewer than 4).
+BEV_CALIB_EXPORT int32_t bev_calib_add_missing(BevCalibSession *s, int32_t cam);
+// Places a board corner by hand at (x, y): moves its point or adds one.
+// Returns the point's index, or -1.
+BEV_CALIB_EXPORT int32_t bev_calib_place_point(BevCalibSession *s, int32_t cam, int32_t board,
+                                               int32_t corner, float x, float y);
+
+// A board's corners on the printed sheet, metres from its top-left, +y down.
+BEV_CALIB_EXPORT int32_t bev_calib_board_corner_count(BevCalibSession *s, int32_t board);
+BEV_CALIB_EXPORT int32_t bev_calib_board_corner(BevCalibSession *s, int32_t board, int32_t corner,
+                                                double *x, double *y);
+// Writes the board as printed, width px wide, marker ids on it and corner
+// (-1 for none) marked, as a PNG. Sheet metres map to its pixels as
+// px = (sheet + *margin_m) * *px_per_m.
+BEV_CALIB_EXPORT int32_t bev_calib_board_reference(BevCalibSession *s, int32_t board, int32_t corner,
+                                                   int32_t width, const char *png_path,
+                                                   double *margin_m, double *px_per_m);
+
 // Recomputes the seams between solved cameras; then read them by index.
 BEV_CALIB_EXPORT int32_t bev_calib_seam_count(BevCalibSession *s);
 BEV_CALIB_EXPORT int32_t bev_calib_seam(BevCalibSession *s, int32_t index, BevCalibSeam *out);

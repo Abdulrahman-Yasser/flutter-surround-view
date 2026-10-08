@@ -64,12 +64,42 @@ CharucoModel::CharucoModel(const CalibBoard &cfg)
     // releases put it top-left with +y down. Marker first_id is always on the
     // printed top row, so its position tells which one this build uses.
     const double h = cfg.squares_y * cfg.square_len;
-    const bool y_up = marker0.y > h / 2;
+    y_up_ = marker0.y > h / 2;
     for (const cv::Point3f &p : obj)
-        corners_.emplace_back(p.x, y_up ? h - p.y : p.y);
+        corners_.emplace_back(p.x, y_up_ ? h - p.y : p.y);
 }
 
 CharucoModel::~CharucoModel() = default;
+
+std::vector<std::pair<int, cv::Point2d>> CharucoModel::marker_centres() const
+{
+#ifdef CALIB_ARUCO_OBJDETECT
+    const auto &obj = impl_->board->getObjPoints();
+    const auto &ids = impl_->board->getIds();
+#else
+    const auto &obj = impl_->board->objPoints;
+    const auto &ids = impl_->board->ids;
+#endif
+    const double h = cfg_.squares_y * cfg_.square_len;
+    std::vector<std::pair<int, cv::Point2d>> out;
+    for (size_t i = 0; i < obj.size() && i < ids.size(); ++i) {
+        cv::Point2d c(0, 0);
+        for (const cv::Point3f &p : obj[i]) c += cv::Point2d(p.x, p.y) * 0.25;
+        out.emplace_back(ids[i], cv::Point2d(c.x, y_up_ ? h - c.y : c.y));
+    }
+    return out;
+}
+
+cv::Mat CharucoModel::draw(cv::Size size) const
+{
+    cv::Mat img;
+#ifdef CALIB_ARUCO_OBJDETECT
+    impl_->board->generateImage(size, img, 0, 1);
+#else
+    impl_->board->draw(size, img, 0, 1);
+#endif
+    return img;
+}
 
 ArucoMarkers CharucoModel::detect_markers(const cv::Mat &gray, int dict)
 {

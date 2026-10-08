@@ -339,6 +339,61 @@ int32_t bev_calib_solve(BevCalibSession *s, int32_t cam, BevCalibSolve *out)
     });
 }
 
+int32_t bev_calib_add_missing(BevCalibSession *s, int32_t cam)
+{
+    if (bad_cam(s, cam)) return -1;
+    std::lock_guard<std::mutex> lock(s->mutex);
+    const int n = s->session->add_missing(cam);
+    if (n < 0) t_error = "needs at least 4 corners on this camera first";
+    return n;
+}
+
+int32_t bev_calib_place_point(BevCalibSession *s, int32_t cam, int32_t board, int32_t corner, float x, float y)
+{
+    if (bad_cam(s, cam)) return -1;
+    std::lock_guard<std::mutex> lock(s->mutex);
+    try {
+        return s->session->place(cam, board, corner, {x, y});
+    } catch (const std::exception &e) {
+        t_error = e.what();
+        return -1;
+    }
+}
+
+static bool bad_board(BevCalibSession *s, int32_t board)
+{
+    if (s && board >= 0 && board < (int32_t)s->session->layout().boards.size()) return false;
+    t_error = "no such board in this layout";
+    return true;
+}
+
+int32_t bev_calib_board_corner_count(BevCalibSession *s, int32_t board)
+{
+    if (bad_board(s, board)) return 0;
+    return (int32_t)s->session->sheet_corners(board).size();
+}
+
+int32_t bev_calib_board_corner(BevCalibSession *s, int32_t board, int32_t corner, double *x, double *y)
+{
+    if (bad_board(s, board)) return 0;
+    const auto &c = s->session->sheet_corners(board);
+    if (corner < 0 || corner >= (int32_t)c.size()) return fail("no such corner");
+    *x = c[(size_t)corner].x;
+    *y = c[(size_t)corner].y;
+    return 1;
+}
+
+int32_t bev_calib_board_reference(BevCalibSession *s, int32_t board, int32_t corner, int32_t width,
+                                  const char *png_path, double *margin_m, double *px_per_m)
+{
+    if (bad_board(s, board)) return 0;
+    std::lock_guard<std::mutex> lock(s->mutex);
+    return guarded([&] {
+        const cv::Mat img = s->session->board_reference(board, corner, width, *margin_m, *px_per_m);
+        return cv::imwrite(png_path, img) ? 1 : fail(std::string("cannot write ") + png_path);
+    });
+}
+
 int32_t bev_calib_seam_count(BevCalibSession *s)
 {
     if (!s) return 0;

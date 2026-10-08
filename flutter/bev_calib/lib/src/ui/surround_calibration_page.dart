@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -59,6 +60,18 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
   List<SeamResult> _seams = const [];
   Map<CameraPosition, PositionState> _mounted = const {};
 
+  PinMarker _marker = PinMarker.plus;
+  bool _showAll = true;
+  bool _showMissing = true;
+  int _refBoard = 0;
+  int? _refCorner;
+  ({int board, int corner})? _placing;
+  String? _refKey;
+  Uint8List? _refPng;
+  ({double margin, double pxPerM})? _refMap;
+  String? _refError;
+  final Map<int, List<Offset>> _sheetCorners = {};
+
   CalibPaths get _paths => widget.paths;
 
   @override
@@ -116,6 +129,11 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
       _cams = [for (var i = 0; i < layout.cameras.length; i++) _Cam(i)];
       _cam = 0;
       _selected = null;
+      _refBoard = 0;
+      _refCorner = null;
+      _placing = null;
+      _refKey = null;
+      _sheetCorners.clear();
       _step = _Step.capture;
     });
     for (var i = 0; i < _cams.length; i++) {
@@ -211,6 +229,148 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
       return;
     }
     setState(() => _resolve(_cam));
+  }
+
+  void _select(int? i) {
+    setState(() {
+      _selected = i;
+      _placing = null;
+      final pts = _cams[_cam].points;
+      if (i != null && i < pts.length) {
+        _refBoard = pts[i].board;
+        _refCorner = pts[i].corner;
+      }
+    });
+  }
+
+  void _place(Offset px) {
+    final target = _placing;
+    if (target == null) return;
+    try {
+      final idx = _session!.placePoint(_cam, target.board, target.corner, px.dx, px.dy);
+      setState(() {
+        _placing = null;
+        _resolve(_cam);
+        _selected = idx;
+      });
+    } on CalibrationException catch (e) {
+      _toast('$e');
+    }
+  }
+
+  void _findMissing() {
+    try {
+      final n = _session!.addMissing(_cam);
+      setState(() {
+        _showMissing = true;
+        _resolve(_cam);
+      });
+      _toast(n == 0
+          ? 'Every corner in view is already pinned'
+          : '$n missing corners added as grey pins; drag each onto its corner');
+    } on CalibrationException catch (e) {
+      _toast('$e. Place corners by hand from the board picture below.');
+    }
+  }
+
+  // The board picture under the buttons, redrawn when the board or the
+  // marked corner changes.
+  void _updateReference() {
+    final corner = _refCorner ?? -1;
+    final key = '$_refBoard:$corner';
+    if (key == _refKey || _session == null) return;
+    try {
+      final path = '${_paths.workDir}/board-reference.png';
+      _refMap = _session!.boardReference(_refBoard, corner, 512, path);
+      _refPng = File(path).readAsBytesSync();
+      _refError = null;
+    } on Object catch (e) {
+      _refPng = null;
+      _refError = '$e';
+    }
+    _refKey = key;
+  }
+
+  void _tapReference(Offset local, double shownWidth) {
+    final map = _refMap;
+    if (map == null) return;
+    final corners = _sheetCorners.putIfAbsent(_refBoard, () => _session!.boardCorners(_refBoard));
+    final sheet = local / (shownWidth / 512) / map.pxPerM - Offset(map.margin, map.margin);
+    final b = _layout!.boards[_refBoard];
+    var best = -1;
+    var bestD = b.square ? b.squareLen : 2 * b.squareLen;
+    for (var i = 0; i < corners.length; i++) {
+      final d = (corners[i] - sheet).distance;
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best < 0) return;
+    final pts = _cams[_cam].points;
+    final existing = pts.indexWhere((p) => p.board == _refBoard && p.corner == best);
+    if (existing >= 0) {
+      _select(existing);
+    } else {
+      setState(() {
+        _selected = null;
+        _refCorner = best;
+        _placing = (board: _refBoard, corner: best);
+      });
+    }
+  }
+
+  String _boardLabel(int i) {
+    final b = _layout!.boards[i];
+    return b.square
+        ? 'Board $i · black square'
+        : 'Board $i · ${b.squaresX}x${b.squaresY} · ids ${b.firstId}-${b.firstId + b.squaresX * b.squaresY ~/ 2 - 1}';
+  }
+
+  Widget _referencePanel(_Cam cam) {
+    const small = TextStyle(color: Colors.white70, fontSize: 12);
+    _updateReference();
+    final corner = _refCorner;
+    final pinIdx = corner == null
+        ? -1
+        : cam.points.indexWhere((p) => p.board == _refBoard && p.corner == corner);
+    final pin = pinIdx >= 0 ? cam.points[pinIdx] : null;
+    final status = corner == null
+        ? 'Click a corner on the board to find or place it.'
+        : pin == null
+            ? 'Corner $corner: not pinned. Click where it is in the image.'
+            : 'Corner $corner: ${pin.guessed ? 'not found yet (grey pin), drag it into place' : pin.moved ? 'moved by hand' : pin.inlier ? 'detected' : 'outlier'}';
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const Text('Where is this corner?', style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 4),
+      DropdownButton<int>(
+        value: _refBoard,
+        isExpanded: true,
+        isDense: true,
+        items: [
+          for (var i = 0; i < _layout!.boards.length; i++)
+            DropdownMenuItem(value: i, child: Text(_boardLabel(i), style: const TextStyle(fontSize: 12))),
+        ],
+        onChanged: (v) => setState(() {
+          _refBoard = v ?? 0;
+          _refCorner = null;
+          _placing = null;
+        }),
+      ),
+      const SizedBox(height: 4),
+      if (_refPng != null)
+        LayoutBuilder(
+          builder: (context, box) => GestureDetector(
+            onTapUp: (d) => _tapReference(d.localPosition, box.maxWidth),
+            child: Image.memory(_refPng!, width: box.maxWidth, gaplessPlayback: true),
+          ),
+        ),
+      if (_refError != null) Text(_refError!, style: const TextStyle(color: _bad, fontSize: 12)),
+      const SizedBox(height: 4),
+      Text(status, style: small),
+      if (_placing != null)
+        TextButton(onPressed: () => setState(() => _placing = null), child: const Text('Cancel placing')),
+    ]);
   }
 
   void _nudge(double dx, double dy) {
@@ -448,8 +608,14 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
             imageSize: cam.size!,
             points: cam.points,
             selected: _selected,
-            onSelect: (i) => setState(() => _selected = i),
+            onSelect: _select,
             onMoved: _move,
+            marker: _marker,
+            visible: (p) => _showAll && (_showMissing || !p.guessed),
+            placing: _placing == null
+                ? null
+                : 'Click where board ${_placing!.board}, corner ${_placing!.corner} is',
+            onPlace: _place,
           );
     return LayoutBuilder(builder: (context, box) {
       final narrow = box.maxWidth < 760;
@@ -522,7 +688,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
               ),
             Text('${cam.points.length} corners · ${s.inliers} inliers · $outliers outliers', style: small),
             if (guessed > 0)
-              Text('$guessed square corners not found: drag each grey pin onto its corner',
+              Text('$guessed corners not found yet: drag each grey pin onto its corner',
                   style: const TextStyle(color: _warn, fontSize: 12)),
             if (s.ok) ...[
               Text('Reprojection ${s.rmsPx.toStringAsFixed(2)} px (max ${s.maxPx.toStringAsFixed(1)})',
@@ -567,6 +733,38 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
               const SizedBox(width: 6),
               Expanded(child: OutlinedButton(onPressed: () => _retake(_cam), child: const Text('Retake'))),
             ]),
+            const SizedBox(height: 6),
+            Row(children: [
+              SegmentedButton<PinMarker>(
+                showSelectedIcon: false,
+                style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                segments: const [
+                  ButtonSegment(value: PinMarker.plus, label: Text('+')),
+                  ButtonSegment(value: PinMarker.cross, label: Text('×')),
+                ],
+                selected: {_marker},
+                onSelectionChanged: (v) => setState(() => _marker = v.first),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: FilterChip(
+                  label: const Text('All pins', style: TextStyle(fontSize: 12)),
+                  selected: _showAll,
+                  onSelected: (v) => setState(() => _showAll = v),
+                ),
+              ),
+            ]),
+            Row(children: [
+              Expanded(child: OutlinedButton(onPressed: _findMissing, child: const Text('Find missing'))),
+              const SizedBox(width: 6),
+              FilterChip(
+                label: const Text('Grey pins', style: TextStyle(fontSize: 12)),
+                selected: _showMissing,
+                onSelected: (v) => setState(() => _showMissing = v),
+              ),
+            ]),
+            const Divider(),
+            _referencePanel(cam),
           ]),
         ),
         const SizedBox(height: 8),
