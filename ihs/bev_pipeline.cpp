@@ -138,6 +138,7 @@ void BevPipeline::shutdown()
     }
     if (camera_ && session_) camera_->requestCompleted.disconnect(session_.get());
     stop_live_cameras();
+    drop_held();
     renderer_.reset();
     requests_.clear();
     if (buffer_allocator_ && stream_) buffer_allocator_->free(stream_);
@@ -309,14 +310,45 @@ bool BevPipeline::init_camera()
     return true;
 }
 
+// Requeues the previously held request once its draw is done, and holds req
+// (drawn under fence) in its place.
+void BevPipeline::hold(Held &held, Camera &camera, Request *req, GLsync fence)
+{
+    if (held.req) {
+        if (held.fence) {
+            glClientWaitSync(held.fence, GL_SYNC_FLUSH_COMMANDS_BIT, 100'000'000);
+            glDeleteSync(held.fence);
+        }
+        held.req->reuse(Request::ReuseBuffers);
+        camera.queueRequest(held.req);
+    }
+    held.req = req;
+    held.fence = fence;
+}
+
+void BevPipeline::drop_held()
+{
+    for (Held *h : {&held_camera_}) {
+        if (h->fence) glDeleteSync(h->fence);
+        *h = Held{};
+    }
+    for (Held &h : held_live_)
+        if (h.fence) glDeleteSync(h.fence);
+    held_live_.clear();
+}
+
 bool BevPipeline::render_camera()
 {
     auto [buf, req] = session_->nextFrame();
     if (!buf) return false;
-    if (camera_cpu_) renderer_->render_frame(camera_cpu_->nv12(buf));
-    else             renderer_->render_frame(buf);
-    req->reuse(Request::ReuseBuffers);
-    camera_->queueRequest(req);
+    if (camera_cpu_) {
+        renderer_->render_frame(camera_cpu_->nv12(buf));
+        req->reuse(Request::ReuseBuffers);
+        camera_->queueRequest(req);
+    } else {
+        renderer_->render_frame(buf);
+        hold(held_camera_, *camera_, req, glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0));
+    }
     return true;
 }
 
@@ -647,13 +679,19 @@ bool BevPipeline::render_surround_live()
     if (cpu_live_) {
         for (size_t i = 0; i < slots_.size(); ++i) frames_[i] = slots_[i].cpu->nv12(live_bufs_[i]);
         renderer_->render_frame_multi(frames_);
-    } else {
-        renderer_->render_frame_multi_live(live_bufs_);
+        for (size_t i = 0; i < slots_.size(); ++i) {
+            live_reqs_[i]->reuse(Request::ReuseBuffers);
+            slots_[i].camera->queueRequest(live_reqs_[i]);
+        }
+        return true;
     }
-    for (size_t i = 0; i < slots_.size(); ++i) {
-        live_reqs_[i]->reuse(Request::ReuseBuffers);
-        slots_[i].camera->queueRequest(live_reqs_[i]);
-    }
+    renderer_->render_frame_multi_live(live_bufs_);
+    // One draw read every slot, so slot 0 carries its fence: waiting on it
+    // (first, in this loop) frees all of the previous draw's buffers.
+    held_live_.resize(slots_.size());
+    for (size_t i = 0; i < slots_.size(); ++i)
+        hold(held_live_[i], *slots_[i].camera, live_reqs_[i],
+             i == 0 ? glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0) : nullptr);
     return true;
 }
 

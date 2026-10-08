@@ -130,6 +130,19 @@ private:
     std::vector<const libcamera::FrameBuffer *>   live_bufs_;
     std::vector<libcamera::Request *>             live_reqs_;
 
+    // Zero-copy frames are sampled by the GPU straight from the camera's
+    // buffers, so a buffer goes back to the camera only once the draw that
+    // read it has finished; else the next capture is written into it while
+    // the GPU still reads it, which tears whatever moves.
+    struct Held {
+        libcamera::Request *req = nullptr;
+        GLsync              fence = nullptr;
+    };
+    void hold(Held &held, libcamera::Camera &camera, libcamera::Request *req, GLsync fence);
+    void drop_held();
+    Held              held_camera_;
+    std::vector<Held> held_live_;
+
     // Pattern mode. The motion is a function of elapsed time, not of the frame
     // counter: tying it to frames makes every hitch and every change of frame
     // rate a change of speed, which is what judder is.
