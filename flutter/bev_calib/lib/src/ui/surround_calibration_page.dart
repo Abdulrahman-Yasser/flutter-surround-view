@@ -267,7 +267,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
       });
       _toast(n == 0
           ? 'Every corner in view is already pinned'
-          : '$n missing corners added as grey pins; drag each onto its corner');
+          : '$n missing corners added as red pins; drag each onto its corner');
     } on CalibrationException catch (e) {
       _toast('$e. Place corners by hand from the board picture below.');
     }
@@ -338,7 +338,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
         ? 'Click a corner on the board to find or place it.'
         : pin == null
             ? 'Corner $corner: not pinned. Click where it is in the image.'
-            : 'Corner $corner: ${pin.guessed ? 'not found yet (grey pin), drag it into place' : pin.moved ? 'moved by hand' : pin.inlier ? 'detected' : 'outlier'}';
+            : 'Corner $corner: ${pin.guessed ? 'not found yet (red pin), drag it into place' : pin.moved ? 'moved by hand' : pin.inlier ? 'detected' : 'outlier'}';
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const Text('Where is this corner?', style: TextStyle(fontWeight: FontWeight.w700)),
       const SizedBox(height: 4),
@@ -705,7 +705,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
               ),
             Text('${cam.points.length} corners · ${s.inliers} inliers · $outliers outliers', style: small),
             if (guessed > 0)
-              Text('$guessed corners not found yet: drag each grey pin onto its corner',
+              Text('$guessed corners not found yet: drag each red pin onto its corner',
                   style: const TextStyle(color: _warn, fontSize: 12)),
             if (s.ok) ...[
               Text('Reprojection ${s.rmsPx.toStringAsFixed(2)} px (max ${s.maxPx.toStringAsFixed(1)})',
@@ -775,7 +775,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
               Expanded(child: OutlinedButton(onPressed: _findMissing, child: const Text('Find missing'))),
               const SizedBox(width: 6),
               FilterChip(
-                label: const Text('Grey pins', style: TextStyle(fontSize: 12)),
+                label: const Text('Not found', style: TextStyle(fontSize: 12)),
                 selected: _showMissing,
                 onSelected: (v) => setState(() => _showMissing = v),
               ),

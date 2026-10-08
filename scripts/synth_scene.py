@@ -99,7 +99,31 @@ def world_to_ground(x, y):
     return (x - X0) * GROUND_PPM, (Y1 - y) * GROUND_PPM
 
 
-def ground_image(boards, seed=1):
+def damage(g, boards, rng):
+    """Spoils parts of the boards as real ones get spoiled, so the detector
+    misses corners: a dark smudge over two markers of every ChArUco board,
+    glare over one corner of every black square."""
+    for b in boards:
+        w, h = b["sx"] * b["side"], b["sy"] * b["side"]
+        if b["square"]:
+            centre = world_to_ground(*sheet_to_world(b, (0, 0)))
+            r = int(0.18 * b["side"] * GROUND_PPM)
+            cv2.circle(g, np.int32(centre), r, 245, cv2.FILLED, cv2.LINE_AA)
+            continue
+        d = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, "DICT_" + b["dict"]))
+        n = b["sx"] * b["sy"] // 2
+        board = cv2.aruco.CharucoBoard((b["sx"], b["sy"]), b["side"], b["marker"], d,
+                                       np.arange(b["first_id"], b["first_id"] + n))
+        board.setLegacyPattern(b["legacy"])
+        markers = board.getObjPoints()
+        for k in rng.choice(len(markers), size=min(2, len(markers)), replace=False):
+            c = np.asarray(markers[k])[:, :2].mean(axis=0)
+            centre = world_to_ground(*sheet_to_world(b, (c[0], c[1])))
+            axes = (int(0.55 * b["side"] * GROUND_PPM), int(0.4 * b["side"] * GROUND_PPM))
+            cv2.ellipse(g, np.int32(centre), axes, float(rng.uniform(0, 180)), 0, 360, 70, cv2.FILLED, cv2.LINE_AA)
+
+
+def ground_image(boards, seed=1, damaged=False):
     rng = np.random.default_rng(seed)
     W, H = int((X1 - X0) * GROUND_PPM), int((Y1 - Y0) * GROUND_PPM)
     noise = cv2.GaussianBlur(rng.normal(0, 12, (H // 8, W // 8)).astype(np.float32), (0, 0), 2)
@@ -127,6 +151,8 @@ def ground_image(boards, seed=1):
         warped = cv2.warpAffine(img, A, (W, H), flags=cv2.INTER_AREA, borderValue=0)
         mask = cv2.warpAffine(np.full_like(img, 255), A, (W, H), flags=cv2.INTER_NEAREST, borderValue=0)
         g[mask > 0] = warped[mask > 0]
+    if damaged:
+        damage(g, boards, rng)
     return g
 
 
@@ -198,6 +224,9 @@ def main():
     ap.add_argument("--pitch", type=float, default=40.0, help="degrees down from horizontal")
     ap.add_argument("--height", type=float, default=0.9, help="camera height, metres")
     ap.add_argument("--size", default="3280x2464")
+    ap.add_argument("--damage", action="store_true",
+                    help="smudge two markers per ChArUco board and glare a corner of each square, "
+                         "so some corners go undetected")
     args = ap.parse_args()
 
     size = tuple(int(v) for v in args.size.lower().split("x"))
@@ -208,7 +237,7 @@ def main():
 
     layout = read_layout(args.layout)
     args.out.mkdir(parents=True, exist_ok=True)
-    ground = ground_image(layout["boards"])
+    ground = ground_image(layout["boards"], damaged=args.damage)
     rays = pixel_rays(K, D, fisheye, size)
     cams = {}
     for cam in layout["cameras"]:

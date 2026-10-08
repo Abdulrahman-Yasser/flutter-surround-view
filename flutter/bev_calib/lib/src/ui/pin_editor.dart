@@ -7,9 +7,9 @@ import 'package:flutter/material.dart';
 import '../calibration.dart';
 
 const pinInlier = Color(0xFF43C46B);
-const pinOutlier = Color(0xFFE5484D);
+const pinOutlier = Color(0xFFB66DFF);
 const pinMoved = Color(0xFFFFB224);
-const pinGuessed = Color(0xFF9AA0A6);
+const pinGuessed = Color(0xFFE5484D);
 
 Color pinColor(CalibPointInfo p) =>
     p.guessed ? pinGuessed : (!p.inlier ? pinOutlier : (p.moved ? pinMoved : pinInlier));
