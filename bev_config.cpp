@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -234,6 +235,10 @@ bool bev_config_load(const std::string &path, BevConfig &out)
 
 bool bev_config_save(const std::string &path, const BevConfig &cfg)
 {
+    // A fresh install has no data directory until something creates it.
+    std::error_code ec;
+    const std::filesystem::path dir = std::filesystem::path(path).parent_path();
+    if (!dir.empty()) std::filesystem::create_directories(dir, ec);
     std::ofstream out(path, std::ios::trunc);
     if (!out.is_open()) {
         std::cerr << "[config] failed to open '" << path << "' for writing\n";
