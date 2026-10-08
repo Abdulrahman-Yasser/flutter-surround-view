@@ -42,9 +42,24 @@ BevSource cameraSource(String cameraId) {
 
 BevSource birdsEyeSource(CameraPosition position) => _surround(<String>['position:${position.key}']);
 
-BevSource _surround(List<String> sources) {
+/// The camera with its fisheye distortion removed, zoomed out so most of its
+/// field still fits a rectilinear picture.
+BevSource flatSource(CameraPosition position) =>
+    _surround(<String>['position:${position.key}'], undistort: 0.6);
+
+/// Whether the camera at [position] has a fisheye lens file.
+bool isFisheye(PositionState? state) {
+  if (state == null || state.lens.isEmpty) return false;
+  for (final LensFile l in LensFile.list(calibPaths.lensDir)) {
+    if (l.name == state.lens) return l.fisheye;
+  }
+  return false;
+}
+
+BevSource _surround(List<String> sources, {double? undistort}) {
   return BevSurroundSource(
     sources,
+    undistort: undistort,
     config: calibPaths.configPath,
     lensDir: calibPaths.lensDir,
     pxPerMeter: double.tryParse(_env('BEV_PX_PER_M') ?? ''),

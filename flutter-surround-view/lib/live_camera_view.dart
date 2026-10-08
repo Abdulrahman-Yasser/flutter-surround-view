@@ -13,11 +13,15 @@ class LiveCameraView extends StatefulWidget {
     required this.position,
     required this.cameraId,
     required this.birdsEye,
+    this.flat = false,
     this.showLabel = false,
   });
 
   final CameraPosition position;
   final String cameraId;
+
+  /// The fisheye-corrected (undistorted) picture instead of the raw one.
+  final bool flat;
   final bool birdsEye;
   final bool showLabel;
 
@@ -50,7 +54,11 @@ class _LiveCameraViewState extends State<LiveCameraView> {
   Widget build(BuildContext context) {
     final CameraPosition position = widget.position;
     final bool birdsEye = widget.birdsEye;
-    final BevSource source = birdsEye ? birdsEyeSource(position) : cameraSource(widget.cameraId);
+    final BevSource source = birdsEye
+        ? birdsEyeSource(position)
+        : widget.flat
+            ? flatSource(position)
+            : cameraSource(widget.cameraId);
     return Container(
       margin: const EdgeInsets.all(3),
       clipBehavior: Clip.hardEdge,
@@ -63,7 +71,7 @@ class _LiveCameraViewState extends State<LiveCameraView> {
         fit: StackFit.expand,
         children: <Widget>[
           BevView(
-            key: ValueKey<String>('${widget.cameraId}-${position.key}-$birdsEye'),
+            key: ValueKey<String>('${widget.cameraId}-${position.key}-$birdsEye-${widget.flat}'),
             source: source,
             onCreated: _onCreated,
           ),
@@ -104,7 +112,7 @@ class _LiveCameraViewState extends State<LiveCameraView> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   child: Text(
-                    birdsEye ? '${position.label} BEV' : position.label,
+                    birdsEye ? '${position.label} BEV' : widget.flat ? '${position.label} 2D' : position.label,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 12,

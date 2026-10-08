@@ -415,7 +415,7 @@ bool BevPipeline::init_surround()
     if (!bev_config_load(params_.config_path, cfg)) return false;
     for (int i = 0; i < n; ++i) {
         const int s = params_.cfg_slots[(size_t)i];
-        if (s < 0 || s >= BevConfig::kMaxSlots || !cfg.slots[s].has_hb2i) {
+        if (s < 0 || s >= BevConfig::kMaxSlots || (!cfg.slots[s].has_hb2i && params_.undistort <= 0.0)) {
             std::fprintf(stderr, "[bev/surround] source %d (%s) maps to config slot %d, which has "
                                  "no hb2i in %s -- calibrate it from the app's calibration screen first\n",
                          i, params_.sources[(size_t)i].c_str(), s, params_.config_path.c_str());
@@ -562,6 +562,19 @@ bool BevPipeline::init_surround()
                 (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)(sc.fisheye ? sc.k4 : sc.p1), (float)sc.p2);
 
         mat3 H = measured_H(sc, px_per_m, canvas_w, canvas_h);
+        if (params_.undistort > 0.0) {
+            // Canvas pixel -> the camera's undistorted image, scaled about the
+            // principal point; the shader then applies the lens model. That
+            // is the image the camera would give through a distortion-free lens.
+            const double z = params_.undistort;
+            const double cxn = sc.has_distortion ? sc.cx / sc.lens_calib_w : 0.5;
+            const double cyn = sc.has_distortion ? sc.cy / sc.lens_calib_h : 0.5;
+            H = mat3{};
+            H.at(0, 0) = 1.0 / (canvas_w * z);
+            H.at(0, 2) = cxn - cxn / z;
+            H.at(1, 1) = 1.0 / (canvas_h * z);
+            H.at(1, 2) = cyn - cyn / z;
+        }
         float Hf[9];
         H.to_floats(Hf);
         if (pyramid_) renderer_->set_ipm_multi_pyramid(i, Hf, (float)sc.facing_deg);
@@ -572,7 +585,7 @@ bool BevPipeline::init_surround()
 
     set_overlap(cfg.overlap_deg);
     set_blend_edge(cfg.blend_edge);
-    renderer_->set_coverage_weight(params_.blend == "coverage");
+    renderer_->set_coverage_weight(params_.blend == "coverage" || params_.undistort > 0.0);
     renderer_->set_px_per_m((float)px_per_m);
     std::printf("[bev/surround] %d source(s), blend=%s, canvas %dx%d\n",
                 n, params_.blend.c_str(), canvas_w, canvas_h);

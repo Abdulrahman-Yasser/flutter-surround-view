@@ -90,7 +90,9 @@ class SingleCameraView extends StatelessWidget {
         LiveCameraView(position: position, cameraId: s.camera, birdsEye: true, showLabel: showLabel),
       CameraSubView.bev =>
         _Notice(position: position, text: 'Not calibrated yet.\nSettings > Surround calibration.'),
-      _ => _Notice(position: position, text: '${subView.label} placeholder'),
+      // A fisheye flattened; a normal lens has nothing to flatten.
+      CameraSubView.calibrated2d => LiveCameraView(
+          position: position, cameraId: s.camera, birdsEye: false, flat: isFisheye(s), showLabel: showLabel),
     };
   }
 }

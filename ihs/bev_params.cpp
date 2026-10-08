@@ -148,6 +148,8 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
             out.config_path = resolve_path(val, assets_dir);
         } else if (key == "lens_dir") {
             out.lens_dir = resolve_path(val, assets_dir);
+        } else if (key == "undistort") {
+            if (!to_double(val, out.undistort) || out.undistort < 0.0) return bad("a zoom, 0 = off");
         } else if (key == "blend") {
             if (val != "feather" && val != "pyramid" && val != "coverage")
                 return bad("feather|pyramid|coverage");

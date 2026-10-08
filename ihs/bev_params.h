@@ -82,6 +82,10 @@ struct BevParams {
     std::string              config_path = "bev_config.ini";
     std::string              lens_dir;   // empty = config_path's directory
     std::string              blend       = "feather";
+    // One camera seen straight on rather than projected to the ground: its
+    // lens distortion removed, zoomed out by undistort (0 = off, 1 = the
+    // camera's own field, below 1 wider, as a fisheye needs). Needs no hb2i.
+    double                   undistort   = 0.0;
     std::string              car_icon;
     double car_width  = 1.8, car_length = 4.5, car_x = 0.0, car_y = 0.0;
     bool   car_width_set = false, car_length_set = false;

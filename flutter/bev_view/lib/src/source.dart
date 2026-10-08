@@ -129,6 +129,7 @@ final class BevSurroundSource extends BevSource {
   /// Sources in config-slot order, as repeated `--src`.
   const BevSurroundSource(
     List<String> this.sources, {
+    this.undistort,
     this.config = 'bev_config.ini',
     this.lensDir,
     this.blend = BevBlend.feather,
@@ -157,9 +158,15 @@ final class BevSurroundSource extends BevSource {
     this.fps,
     this.width,
     this.height,
-  }) : sources = null;
+  }) : sources = null, undistort = null;
 
   final List<String>? sources;
+
+  /// One camera seen straight on instead of on the ground: its lens
+  /// distortion removed and zoomed out by this factor (1 = the camera's own
+  /// field, below 1 wider, as a fisheye needs). Needs no surround
+  /// calibration.
+  final double? undistort;
   final String? forwardLeft;
   final String? forwardRight;
   final String? backwardLeft;
@@ -184,6 +191,7 @@ final class BevSurroundSource extends BevSource {
   @override
   List<MapEntry<String, String>> toParams() => [
     const MapEntry('mode', 'surround'),
+    if (undistort != null) MapEntry('undistort', '$undistort'),
     if (fps != null) MapEntry('camera_fps', '$fps'),
     if (width != null) MapEntry('width', '$width'),
     if (height != null) MapEntry('height', '$height'),
