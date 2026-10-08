@@ -276,12 +276,11 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
   // The board picture under the buttons, redrawn when the board or the
   // marked corner changes.
   void _updateReference() {
-    final corner = _refCorner ?? -1;
-    final key = '$_refBoard:$corner';
+    final key = '$_refBoard';
     if (key == _refKey || _session == null) return;
     try {
       final path = '${_paths.workDir}/board-reference.png';
-      _refMap = _session!.boardReference(_refBoard, corner, 512, path);
+      _refMap = _session!.boardReference(_refBoard, -1, 512, path);
       _refPng = File(path).readAsBytesSync();
       _refError = null;
     } on Object catch (e) {
@@ -362,7 +361,25 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
         LayoutBuilder(
           builder: (context, box) => GestureDetector(
             onTapUp: (d) => _tapReference(d.localPosition, box.maxWidth),
-            child: Image.memory(_refPng!, width: box.maxWidth, gaplessPlayback: true),
+            child: Stack(children: [
+              Image.memory(_refPng!, width: box.maxWidth, gaplessPlayback: true),
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _ReferencePainter(
+                    corners: _sheetCorners.putIfAbsent(_refBoard, () => _session!.boardCorners(_refBoard)),
+                    toPx: (sheet) => (sheet + Offset(_refMap!.margin, _refMap!.margin)) *
+                        _refMap!.pxPerM *
+                        (box.maxWidth / 512),
+                    pins: {
+                      for (final p in cam.points)
+                        if (p.board == _refBoard) p.corner: p,
+                    },
+                    selected: _refCorner,
+                    marker: _marker,
+                  ),
+                ),
+              ),
+            ]),
           ),
         ),
       if (_refError != null) Text(_refError!, style: const TextStyle(color: _bad, fontSize: 12)),
@@ -846,6 +863,53 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
       ),
     ]);
   }
+}
+
+/// The camera's pins on the printed board: each corner in its pin's colour,
+/// a faint ring where a corner has no pin yet, the selected one as in the
+/// image.
+class _ReferencePainter extends CustomPainter {
+  _ReferencePainter({
+    required this.corners,
+    required this.toPx,
+    required this.pins,
+    required this.selected,
+    required this.marker,
+  });
+
+  final List<Offset> corners;
+  final Offset Function(Offset sheet) toPx;
+  final Map<int, CalibPointInfo> pins;
+  final int? selected;
+  final PinMarker marker;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (var i = 0; i < corners.length; i++) {
+      if (i == selected) continue;
+      final at = toPx(corners[i]);
+      final pin = pins[i];
+      if (pin == null) {
+        canvas.drawCircle(
+            at,
+            3,
+            Paint()
+              ..color = Colors.blueGrey
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1);
+      } else {
+        paintPin(canvas, at, pinColor(pin), marker, scale: 0.7);
+      }
+    }
+    final sel = selected;
+    if (sel != null && sel < corners.length) {
+      final pin = pins[sel];
+      paintPin(canvas, toPx(corners[sel]), pin == null ? pinMoved : pinColor(pin), marker, selected: true, scale: 0.8);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ReferencePainter old) => true;
 }
 
 class _Legend extends StatelessWidget {

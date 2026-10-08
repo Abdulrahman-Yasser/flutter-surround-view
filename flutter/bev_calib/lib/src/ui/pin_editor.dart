@@ -17,6 +17,38 @@ Color pinColor(CalibPointInfo p) =>
 /// How a pin is drawn: arms along the image axes, or diagonal.
 enum PinMarker { plus, cross }
 
+/// One pin: four arms with an open centre, so the corner pixel itself stays
+/// visible, outlined to show on any background. The selected one is larger
+/// and ringed. Shared by the image and the board picture so both match.
+void paintPin(Canvas canvas, Offset at, Color color, PinMarker marker,
+    {bool selected = false, double scale = 1}) {
+  final dirs = marker == PinMarker.plus
+      ? const [Offset(1, 0), Offset(-1, 0), Offset(0, 1), Offset(0, -1)]
+      : const [Offset(0.7071, 0.7071), Offset(-0.7071, 0.7071), Offset(0.7071, -0.7071), Offset(-0.7071, -0.7071)];
+  final arm = (selected ? 16.0 : 9.0) * scale, gap = (selected ? 4.0 : 3.0) * scale;
+  void arms(Paint paint) {
+    for (final d in dirs) {
+      canvas.drawLine(at + d * gap, at + d * arm, paint);
+    }
+  }
+
+  arms(Paint()
+    ..color = Colors.black.withValues(alpha: 0.6)
+    ..strokeWidth = selected ? 3.5 : 3);
+  arms(Paint()
+    ..color = color
+    ..strokeWidth = selected ? 1.6 : 1.2);
+  if (selected) {
+    canvas.drawCircle(
+        at,
+        arm + 4 * scale,
+        Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5);
+  }
+}
+
 /// A captured still with a pin on every corner. Scroll or pinch zooms,
 /// dragging the background pans, double-click zooms in on the selected pin.
 /// Tap selects the nearest pin and dragging one moves it, with a magnifier
@@ -72,6 +104,7 @@ class _PinEditorState extends State<PinEditor> {
   Offset? _doubleTapAt;
   Offset? _lastFocal;
   double _lastScale = 1;
+  Size _box = Size.zero;
 
   double get _scale => _fit * _zoom;
   Offset get _origin => _fitOrigin + _pan;
@@ -84,6 +117,15 @@ class _PinEditorState extends State<PinEditor> {
     if (old.image.path != widget.image.path) {
       _zoom = 1;
       _pan = Offset.zero;
+      return;
+    }
+    // Picked elsewhere (the board picture, the arrows): bring it into view.
+    final sel = widget.selected;
+    if (sel != null && sel != old.selected && sel < widget.points.length && _zoom > 1) {
+      final at = _toScreen(Offset(widget.points[sel].x, widget.points[sel].y));
+      if (!(Offset.zero & _box).deflate(24).contains(at)) {
+        _pan += _box.center(Offset.zero) - at;
+      }
     }
   }
 
@@ -129,6 +171,7 @@ class _PinEditorState extends State<PinEditor> {
     return LayoutBuilder(builder: (context, box) {
       final iw = widget.imageSize.width, ih = widget.imageSize.height;
       final size = Size(box.maxWidth, box.maxHeight);
+      _box = size;
       _fit = math.min(box.maxWidth / iw, box.maxHeight / ih);
       _fitOrigin = Offset((box.maxWidth - iw * _fit) / 2, (box.maxHeight - ih * _fit) / 2);
 
@@ -322,38 +365,11 @@ class _PinPainter extends CustomPainter {
   final Offset Function(Offset) toScreen;
   final PinMarker marker;
 
-  // Four arms with an open centre, so the corner pixel itself stays visible.
-  void _crosshair(Canvas canvas, Offset at, double arm, double gap, Paint paint) {
-    final dirs = marker == PinMarker.plus
-        ? const [Offset(1, 0), Offset(-1, 0), Offset(0, 1), Offset(0, -1)]
-        : const [Offset(0.7071, 0.7071), Offset(-0.7071, 0.7071), Offset(0.7071, -0.7071), Offset(-0.7071, -0.7071)];
-    for (final d in dirs) {
-      canvas.drawLine(at + d * gap, at + d * arm, paint);
-    }
-  }
-
   @override
   void paint(Canvas canvas, Size size) {
     for (final p in points) {
-      final isSel = p.index == selected;
       final at = toScreen(p.index == dragging && dragImagePx != null ? dragImagePx! : Offset(p.x, p.y));
-      final color = p.index == dragging ? pinMoved : pinColor(p);
-      final arm = isSel ? 16.0 : 9.0, gap = isSel ? 4.0 : 3.0;
-      _crosshair(canvas, at, arm, gap, Paint()
-        ..color = Colors.black.withValues(alpha: 0.6)
-        ..strokeWidth = isSel ? 3.5 : 3);
-      _crosshair(canvas, at, arm, gap, Paint()
-        ..color = color
-        ..strokeWidth = isSel ? 1.6 : 1.2);
-      if (isSel) {
-        canvas.drawCircle(
-            at,
-            arm + 4,
-            Paint()
-              ..color = Colors.white
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 1.5);
-      }
+      paintPin(canvas, at, p.index == dragging ? pinMoved : pinColor(p), marker, selected: p.index == selected);
     }
   }
 
