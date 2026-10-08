@@ -270,6 +270,23 @@ StillCamera::~StillCamera() = default;
 
 cv::Size StillCamera::size() const { return {(int)impl_->width, (int)impl_->height}; }
 
+cv::Mat StillCamera::settled(int min_frames, double max_seconds)
+{
+    const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(max_seconds);
+    cv::Mat frame = grab();
+    cv::Scalar last = cv::mean(frame);
+    for (int n = 1;; ++n) {
+        frame = grab();
+        const cv::Scalar now = cv::mean(frame);
+        double change = 0;
+        for (int c = 0; c < 3; ++c) change = std::max(change, std::abs(now[c] - last[c]));
+        last = now;
+        if (n >= min_frames && change < 1.5) break;
+        if (std::chrono::steady_clock::now() > end) break;
+    }
+    return frame;
+}
+
 cv::Mat StillCamera::grab(int timeout_ms)
 {
     Impl &d = *impl_;

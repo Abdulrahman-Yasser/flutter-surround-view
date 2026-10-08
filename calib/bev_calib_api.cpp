@@ -100,7 +100,7 @@ int32_t bev_calib_camera_snapshot(const char *camera_id, const char *jpeg_path, 
         cv::Mat frame;
         {
             StillCamera camera(camera_id);
-            for (int i = 0; i < 8; ++i) frame = camera.grab();
+            frame = camera.settled(8);
         }
         const double scale = (double)width / frame.cols;
         cv::Mat small;
@@ -238,7 +238,7 @@ int32_t bev_calib_capture(BevCalibSession *s, int32_t cam, int32_t settle_frames
         cv::Mat still;
         {
             StillCamera camera(id);
-            for (int i = 0; i < std::max(1, (int)settle_frames); ++i) still = camera.grab();
+            still = camera.settled(std::max(1, (int)settle_frames));
         }
         s->session->set_image(cam, still);
         return 1;

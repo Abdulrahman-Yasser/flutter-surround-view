@@ -25,6 +25,10 @@ public:
 
     // The newest frame, waiting for one if none arrived since the last call.
     cv::Mat grab(int timeout_ms = 3000);
+    // A frame once auto exposure and white balance have settled: at least
+    // min_frames, then until the colour stops changing between frames, or
+    // max_seconds. A USB camera in a dim room can take seconds.
+    cv::Mat settled(int min_frames, double max_seconds = 8.0);
     cv::Size size() const;
 
 private:
