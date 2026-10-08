@@ -186,17 +186,25 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
     return null;
   }
 
-  // One lens file per camera: the model and where it is mounted, e.g.
-  // imx219-right; the port when it isn't mounted anywhere yet.
+  // One lens file per physical camera: its model and the port libcamera
+  // names it by (imx219-i2c-88000), so the calibration stays with the camera
+  // wherever it is mounted. /dev/video numbers aren't stable across boots.
   void _suggestName() {
     final id = _camera;
     if (id == null || (_lens.text.trim().isNotEmpty && _lens.text.trim() != _suggested)) return;
+    String slug(String s) => s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
     final model = (_cameras?.firstWhere((c) => c.id == id, orElse: () => CameraInfo(id, 'camera')).model ?? 'camera')
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '-');
-    final where = _positionOf(id)?.key.replaceAll('_', '-') ??
-        id.split('/').where((p) => p.isNotEmpty).last.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
-    _suggested = '$model-$where'.replaceAll(RegExp(r'-+'), '-').replaceAll(RegExp(r'^-|-$'), '');
+        .split(':')
+        .first;
+    final parts = id.split('/').where((p) => p.isNotEmpty).toList();
+    // A CSI sensor is a node (imx219@10) under its bus (i2c@88000); a USB
+    // camera's last node is its port.
+    final port = parts.isEmpty
+        ? id
+        : parts.last.startsWith('usb') || parts.length < 2
+            ? parts.last.split(':').first
+            : parts[parts.length - 2];
+    _suggested = '${slug(model)}-${slug(port)}';
     _lens.text = _suggested;
   }
 
