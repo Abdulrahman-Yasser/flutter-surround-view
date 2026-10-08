@@ -130,6 +130,10 @@ class PositionState {
 
   /// Mounts [cameraId] at [position] (empty clears it), taking it off any
   /// other position.
+  /// Makes the camera at [position] use `<lens dir>/<lens>-lens.ini`.
+  static void setLens(String configPath, CameraPosition position, String lens) =>
+      _withString(configPath, (c) => _withString(lens, (l) => _check(bev_calib_config_set_lens(c, position.index, l))));
+
   static void assign(String configPath, CameraPosition position, String cameraId) =>
       _withString(configPath, (c) => _withString(cameraId, (i) => _check(bev_calib_config_assign(c, position.index, i))));
 }

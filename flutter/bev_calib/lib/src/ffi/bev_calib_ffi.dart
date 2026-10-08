@@ -201,6 +201,9 @@ external int bev_calib_config_position(Pointer<Char> configPath, int position, P
 @Native<Int32 Function(Pointer<Char>, Int32, Pointer<Char>)>()
 external int bev_calib_config_assign(Pointer<Char> configPath, int position, Pointer<Char> cameraId);
 
+@Native<Int32 Function(Pointer<Char>, Int32, Pointer<Char>)>()
+external int bev_calib_config_set_lens(Pointer<Char> configPath, int position, Pointer<Char> lens);
+
 @Native<Int32 Function(Pointer<Char>, Pointer<BevCalibLayoutInfo>)>()
 external int bev_calib_layout_info(Pointer<Char> path, Pointer<BevCalibLayoutInfo> out);
 

@@ -183,6 +183,15 @@ int32_t bev_calib_layout_board(const char *path, int32_t index, BevCalibBoardInf
     return 1;
 }
 
+int32_t bev_calib_config_set_lens(const char *config_path, int32_t position, const char *lens)
+{
+    if (!bev_position_name(position)) return fail("no such position");
+    BevConfig cfg;
+    if (!bev_config_load(config_path, cfg)) return fail(std::string("malformed ") + config_path);
+    cfg.slots[position].lens_model = lens ? lens : "";
+    return bev_config_save(config_path, cfg) ? 1 : fail(std::string("cannot write ") + config_path);
+}
+
 BevCalibSession *bev_calib_open(const char *layout_path, const char *lens_dir, const char *config_path)
 {
     CalibLayout l;

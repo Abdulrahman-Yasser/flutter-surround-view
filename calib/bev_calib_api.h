@@ -56,6 +56,10 @@ BEV_CALIB_EXPORT int32_t bev_calib_config_position(const char *config_path, int3
 // position, and saves config_path.
 BEV_CALIB_EXPORT int32_t bev_calib_config_assign(const char *config_path, int32_t position,
                                                  const char *camera_id);
+// Sets the lens the camera at position uses (<lens_dir>/<lens>-lens.ini) and
+// saves config_path.
+BEV_CALIB_EXPORT int32_t bev_calib_config_set_lens(const char *config_path, int32_t position,
+                                                   const char *lens);
 
 // ── Layout files ─────────────────────────────────────────────────────────────
 

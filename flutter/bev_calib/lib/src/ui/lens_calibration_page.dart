@@ -31,7 +31,9 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
   String? _cameraError;
   String? _camera;
   Map<CameraPosition, PositionState> _mounted = const {};
-  final _lens = TextEditingController(text: 'imx219');
+  final _lens = TextEditingController();
+  // The name last filled in for the chosen camera; a name typed over it is kept.
+  String _suggested = '';
   bool _fisheye = false;
   late final _squares = TextEditingController(text: '${widget.board.squaresX}x${widget.board.squaresY}');
   late final _square = TextEditingController(text: (widget.board.squareLen * 1000).toStringAsFixed(0));
@@ -58,6 +60,7 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
       setState(() {
         _cameras = cams;
         _camera = cams.isEmpty ? null : cams.first.id;
+        _suggestName();
       });
     }, onError: (Object e) {
       if (mounted) setState(() => _cameraError = '$e');
@@ -176,12 +179,56 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
     setState(() => _busy = null);
   }
 
-  void _save() {
-    final path = '${widget.paths.lensDir}/${_lens.text.trim()}-lens.ini';
+  CameraPosition? _positionOf(String id) {
+    for (final e in _mounted.entries) {
+      if (e.value.camera == id) return e.key;
+    }
+    return null;
+  }
+
+  // One lens file per camera: the model and where it is mounted, e.g.
+  // imx219-right; the port when it isn't mounted anywhere yet.
+  void _suggestName() {
+    final id = _camera;
+    if (id == null || (_lens.text.trim().isNotEmpty && _lens.text.trim() != _suggested)) return;
+    final model = (_cameras?.firstWhere((c) => c.id == id, orElse: () => CameraInfo(id, 'camera')).model ?? 'camera')
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    final where = _positionOf(id)?.key.replaceAll('_', '-') ??
+        id.split('/').where((p) => p.isNotEmpty).last.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
+    _suggested = '$model-$where'.replaceAll(RegExp(r'-+'), '-').replaceAll(RegExp(r'^-|-$'), '');
+    _lens.text = _suggested;
+  }
+
+  Future<void> _save() async {
+    final name = _lens.text.trim();
+    final path = '${widget.paths.lensDir}/$name-lens.ini';
+    if (File(path).existsSync()) {
+      final replace = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Replace $name-lens.ini?'),
+          content: const Text('A lens file with this name exists, possibly from another camera. '
+              'Give this one its own name to keep both.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Replace')),
+          ],
+        ),
+      );
+      if (replace != true || !mounted) return;
+    }
     try {
       Directory(widget.paths.lensDir).createSync(recursive: true);
       _session!.save(path);
-      _toast('Saved $path');
+      final position = _camera == null ? null : _positionOf(_camera!);
+      if (position != null) {
+        PositionState.setLens(widget.paths.configPath, position, name);
+        _mounted = PositionState.read(widget.paths.configPath);
+        _toast('Saved $name-lens.ini, now the ${position.label} camera\'s lens');
+      } else {
+        _toast('Saved $path');
+      }
     } on CalibrationException catch (e) {
       _toast('Save failed: $e');
     }
@@ -255,7 +302,10 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
               for (final c in _cameras ?? const <CameraInfo>[])
                 DropdownMenuItem(value: c.id, child: Text(_cameraName(c.id), overflow: TextOverflow.ellipsis)),
             ],
-            onChanged: (v) => setState(() => _camera = v),
+            onChanged: (v) => setState(() {
+              _camera = v;
+              _suggestName();
+            }),
           ),
           if (_cameras != null && _cameras!.isEmpty)
             const Text('No camera found', style: TextStyle(color: _bad, fontSize: 12)),
