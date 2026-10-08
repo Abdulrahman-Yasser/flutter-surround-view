@@ -358,6 +358,7 @@ if (ENABLE_CALIB)
         calib/calib_session.cpp
         calib/charuco_board.cpp
         calib/intrinsics.cpp
+        calib/lens.cpp
     )
     set_target_properties(bev_calib_core PROPERTIES
         POSITION_INDEPENDENT_CODE ON

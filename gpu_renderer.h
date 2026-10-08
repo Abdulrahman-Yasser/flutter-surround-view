@@ -116,11 +116,12 @@ public:
     // normalized by the caller (divided by that camera's own frame
     // width/height) -- NOT the raw pixel values a lens file stores; this
     // keeps the shader/API entirely in [0,1] uv terms with no separate
-    // image-size uniforms needed. has_distortion=false (the default state,
-    // no lens configured/found) skips the correction in the shader
-    // entirely, reproducing today's exact undistorted behavior at zero
-    // cost. Same cheap, per-keypress/per-lookup contract as set_ipm_multi().
-    void set_distortion_multi(int slot, bool has_distortion,
+    // image-size uniforms needed. lens_mode is lens_mode() from
+    // bev_setup.h: 0 (the default state, no lens configured/found) skips
+    // the correction in the shader entirely, 1 is the pinhole model above,
+    // 2 is cv::fisheye with k1..k4 passed as k1, k2, k3, p1.
+    // Same cheap, per-keypress/per-lookup contract as set_ipm_multi().
+    void set_distortion_multi(int slot, int lens_mode,
                               float fx, float fy, float cx, float cy,
                               float k1, float k2, float k3, float p1, float p2);
     int  num_cameras_multi() const { return num_cameras_multi_; }
@@ -177,7 +178,7 @@ public:
     // dist{0,1,2}_pyr_ arrays, same as set_ipm_multi_pyramid() does for
     // H_pyr_/facing_pyr_; actual upload happens per-camera inside
     // render_frame_multi_pyramid().
-    void set_distortion_multi_pyramid(int slot, bool has_distortion,
+    void set_distortion_multi_pyramid(int slot, int lens_mode,
                                       float fx, float fy, float cx, float cy,
                                       float k1, float k2, float k3, float p1, float p2);
     int  num_cameras_multi_pyramid() const { return num_cameras_multi_pyramid_; }
@@ -318,8 +319,8 @@ private:
     // render_frame_multi_pyramid().
     GLint u_dist0_pyr_loc_ = -1, u_dist1_pyr_loc_ = -1, u_dist2_pyr_loc_ = -1;
     float dist0_pyr_[kPyramidMaxCameras][4] = {}; // fx,fy,cx,cy
-    float dist1_pyr_[kPyramidMaxCameras][4] = {}; // k1,k2,k3,p1
-    float dist2_pyr_[kPyramidMaxCameras][2] = {}; // p2,hasDistortion
+    float dist1_pyr_[kPyramidMaxCameras][4] = {}; // k1,k2,k3,p1 (k4 for fisheye)
+    float dist2_pyr_[kPyramidMaxCameras][2] = {}; // p2,lens mode
 
     int num_cameras_multi_pyramid_ = 0;
     int num_levels_multi_pyramid_  = 0;

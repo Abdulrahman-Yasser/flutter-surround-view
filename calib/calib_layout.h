@@ -3,8 +3,10 @@
 #include <string>
 #include <vector>
 
-// A calibration setup: which cameras take part and where each ChArUco board
-// lies on the ground around the car.
+// A calibration setup: which cameras take part and where each board lies on
+// the ground around the car. A board is a ChArUco board or a plain black
+// square. Squares carry no ids, so they are found where a camera's ChArUco
+// corners predict them; every camera needs a ChArUco board in view.
 //
 // Car frame, metres: origin at the car centre, +X right, +Y forward (the same
 // convention as BevSlotConfig::facing_deg). A board's (x, y) is its centre;
@@ -18,6 +20,7 @@ struct CalibCamera {
 };
 
 struct CalibBoard {
+    bool   square = false;           // type = square: one black square of side square_len
     std::string dict = "4X4_50";
     int    squares_x = 6, squares_y = 8;
     double square_len = 0.090, marker_len = 0.070;
@@ -25,8 +28,8 @@ struct CalibBoard {
     bool   legacy = true;
     double x = 0.0, y = 0.0, yaw_deg = 0.0;
 
-    int markers() const { return squares_x * squares_y / 2; }
-    int corners() const { return (squares_x - 1) * (squares_y - 1); }
+    int markers() const { return square ? 0 : squares_x * squares_y / 2; }
+    int corners() const { return square ? 4 : (squares_x - 1) * (squares_y - 1); }
 };
 
 struct CalibLayout {

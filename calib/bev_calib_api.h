@@ -47,6 +47,7 @@ typedef struct BevCalibBoardInfo {
     int32_t squares_x, squares_y, first_id;
     double square_len, marker_len;
     double x, y, yaw_deg;       // centre in the car frame, metres / degrees
+    int32_t square;             // a plain black square of side square_len, 1x1, no dict
 } BevCalibBoardInfo;
 
 BEV_CALIB_EXPORT int32_t bev_calib_layout_info(const char *path, BevCalibLayoutInfo *out);
@@ -61,6 +62,7 @@ typedef struct BevCalibPoint {
     float x, y;                 // still pixel
     double world_x, world_y;    // car frame, metres
     int32_t board, corner, moved, inlier;
+    int32_t guessed;            // square corner placed by prediction; ignored until moved
 } BevCalibPoint;
 
 typedef struct BevCalibSolve {
@@ -79,6 +81,10 @@ typedef struct BevCalibSeam {
 BEV_CALIB_EXPORT BevCalibSession *bev_calib_open(const char *layout_path, const char *lens_dir);
 BEV_CALIB_EXPORT void bev_calib_close(BevCalibSession *s);
 BEV_CALIB_EXPORT int32_t bev_calib_has_lens(BevCalibSession *s, int32_t cam);
+// Uses "<lens_dir>/<lens>-lens.ini" for cam instead of the layout's lens, and
+// saves that name as the slot's lens_model. An empty lens means none.
+BEV_CALIB_EXPORT int32_t bev_calib_set_lens(BevCalibSession *s, int32_t cam, const char *lens_dir,
+                                            const char *lens);
 
 // Full-resolution still from the camera's slot, after settle_frames frames
 // of auto exposure. Blocks for a few seconds.
@@ -117,12 +123,16 @@ typedef struct BevIntrResult {
     double rms_px, worst_view_px;
     double fx, fy, cx, cy;
     double k1, k2, p1, p2, k3;
+    int32_t fisheye;
+    double k4;                  // fisheye only, which has no p1/p2
 } BevIntrResult;
 
-// Streams camera_index at full resolution until closed.
+// Streams camera_index at full resolution until closed. fisheye selects
+// cv::fisheye's model over the pinhole one.
 BEV_CALIB_EXPORT BevCalibIntrinsics *bev_intr_open(int32_t camera_index, const char *dict,
                                                    int32_t squares_x, int32_t squares_y,
-                                                   double square_len, double marker_len, int32_t legacy);
+                                                   double square_len, double marker_len, int32_t legacy,
+                                                   int32_t fisheye);
 BEV_CALIB_EXPORT void bev_intr_close(BevCalibIntrinsics *h);
 
 // Grabs the newest frame, detects the board, and writes a JPEG of it scaled

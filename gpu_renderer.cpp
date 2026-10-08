@@ -237,11 +237,12 @@ uniform float uFacingDeg[MAX_CAMERAS];
 // from). fx/fy/cx/cy (uDist0) are pre-normalized by the CPU caller into
 // [0,1] uv terms -- not raw pixel values. k1/k2/k3 (radial, uDist1.xyz) and
 // p1/p2 (tangential, uDist1.w/uDist2.x) follow the standard OpenCV
-// distortion-model convention. uDist2.y > 0.5 gates the correction on;
-// default (0) skips it entirely, reproducing today's undistorted behavior.
+// distortion-model convention. uDist2.y is the lens mode: 0 skips the
+// correction, 1 is that pinhole model, 2 is cv::fisheye with k1..k4 in
+// uDist1.
 uniform vec4  uDist0[MAX_CAMERAS]; // fx, fy, cx, cy
-uniform vec4  uDist1[MAX_CAMERAS]; // k1, k2, k3, p1
-uniform vec2  uDist2[MAX_CAMERAS]; // p2, hasDistortion
+uniform vec4  uDist1[MAX_CAMERAS]; // k1, k2, k3, p1 (k4 for fisheye)
+uniform vec2  uDist2[MAX_CAMERAS]; // p2, lens mode
 uniform int   uNumCameras;
 
 // BEV canvas size in pixels (matches the FBO/render size; set once at
@@ -294,7 +295,16 @@ const float kPi = 3.14159265358979;
     if (IDX < uNumCameras) {                                                 \
         vec3 s  = uH[IDX] * p;                                              \
         vec2 uv = s.xy / s.z;                                               \
-        if (uDist2[IDX].y > 0.5) {                                          \
+        if (uDist2[IDX].y > 1.5) {                                          \
+            vec4 d0 = uDist0[IDX]; vec4 d1 = uDist1[IDX];                   \
+            float x = (uv.x - d0.z) / d0.x;                                \
+            float y = (uv.y - d0.w) / d0.y;                                \
+            float r = sqrt(x*x + y*y);                                     \
+            float th = atan(r), t2 = th*th;                                \
+            float thd = th*(1.0 + t2*(d1.x + t2*(d1.y + t2*(d1.z + t2*d1.w))));\
+            float k = r > 1e-8 ? thd / r : 1.0;                            \
+            uv = vec2(d0.x*x*k + d0.z, d0.y*y*k + d0.w);                   \
+        } else if (uDist2[IDX].y > 0.5) {                                   \
             vec4 d0 = uDist0[IDX]; vec4 d1 = uDist1[IDX];                   \
             float p2v = uDist2[IDX].x;                                     \
             float x = (uv.x - d0.z) / d0.x;                                \
@@ -420,7 +430,16 @@ const float kPi = 3.14159265358979;
     if (IDX < uNumCameras) {                                                 \
         vec3 s  = uH[IDX] * p;                                              \
         vec2 uv = s.xy / s.z;                                               \
-        if (uDist2[IDX].y > 0.5) {                                          \
+        if (uDist2[IDX].y > 1.5) {                                          \
+            vec4 d0 = uDist0[IDX]; vec4 d1 = uDist1[IDX];                   \
+            float x = (uv.x - d0.z) / d0.x;                                \
+            float y = (uv.y - d0.w) / d0.y;                                \
+            float r = sqrt(x*x + y*y);                                     \
+            float th = atan(r), t2 = th*th;                                \
+            float thd = th*(1.0 + t2*(d1.x + t2*(d1.y + t2*(d1.z + t2*d1.w))));\
+            float k = r > 1e-8 ? thd / r : 1.0;                            \
+            uv = vec2(d0.x*x*k + d0.z, d0.y*y*k + d0.w);                   \
+        } else if (uDist2[IDX].y > 0.5) {                                   \
             vec4 d0 = uDist0[IDX]; vec4 d1 = uDist1[IDX];                   \
             float p2v = uDist2[IDX].x;                                     \
             float x = (uv.x - d0.z) / d0.x;                                \
@@ -567,8 +586,8 @@ uniform float uFacingDeg;
 // (see that shader's comment), just non-array since this program draws one
 // camera at a time.
 uniform vec4  uDist0; // fx, fy, cx, cy
-uniform vec4  uDist1; // k1, k2, k3, p1
-uniform vec2  uDist2; // p2, hasDistortion
+uniform vec4  uDist1; // k1, k2, k3, p1 (k4 for fisheye)
+uniform vec2  uDist2; // p2, lens mode
 
 uniform float uBevWidth;
 uniform float uBevHeight;
@@ -586,7 +605,15 @@ void main() {
     vec3 s = uH * p;
     vec2 uv = s.xy / s.z;
 
-    if (uDist2.y > 0.5) {
+    if (uDist2.y > 1.5) {
+        float x = (uv.x - uDist0.z) / uDist0.x;
+        float y = (uv.y - uDist0.w) / uDist0.y;
+        float r = sqrt(x*x + y*y);
+        float th = atan(r), t2 = th*th;
+        float thd = th*(1.0 + t2*(uDist1.x + t2*(uDist1.y + t2*(uDist1.z + t2*uDist1.w))));
+        float k = r > 1e-8 ? thd / r : 1.0;
+        uv = vec2(uDist0.x*x*k + uDist0.z, uDist0.y*y*k + uDist0.w);
+    } else if (uDist2.y > 0.5) {
         float x = (uv.x - uDist0.z) / uDist0.x;
         float y = (uv.y - uDist0.w) / uDist0.y;
         float r2 = x*x + y*y;
@@ -1530,7 +1557,7 @@ void GpuRenderer::set_ipm_multi(int slot, const float H[9], float facing_deg)
     glUniform1f(u_facing_multi_[slot], facing_deg);
 }
 
-void GpuRenderer::set_distortion_multi(int slot, bool has_distortion,
+void GpuRenderer::set_distortion_multi(int slot, int lens_mode,
                                        float fx, float fy, float cx, float cy,
                                        float k1, float k2, float k3, float p1, float p2)
 {
@@ -1538,7 +1565,7 @@ void GpuRenderer::set_distortion_multi(int slot, bool has_distortion,
     glUseProgram(prog_multi_);
     glUniform4f(u_dist0_multi_[slot], fx, fy, cx, cy);
     glUniform4f(u_dist1_multi_[slot], k1, k2, k3, p1);
-    glUniform2f(u_dist2_multi_[slot], p2, has_distortion ? 1.0f : 0.0f);
+    glUniform2f(u_dist2_multi_[slot], p2, (float)lens_mode);
 }
 
 bool GpuRenderer::init_car_icon(const char *png_path, float width_m, float length_m,
@@ -1798,7 +1825,7 @@ void GpuRenderer::set_ipm_multi_pyramid(int slot, const float H[9], float facing
     facing_pyr_[slot] = facing_deg;
 }
 
-void GpuRenderer::set_distortion_multi_pyramid(int slot, bool has_distortion,
+void GpuRenderer::set_distortion_multi_pyramid(int slot, int lens_mode,
                                                float fx, float fy, float cx, float cy,
                                                float k1, float k2, float k3, float p1, float p2)
 {
@@ -1810,7 +1837,7 @@ void GpuRenderer::set_distortion_multi_pyramid(int slot, bool has_distortion,
     dist1_pyr_[slot][0] = k1; dist1_pyr_[slot][1] = k2;
     dist1_pyr_[slot][2] = k3; dist1_pyr_[slot][3] = p1;
     dist2_pyr_[slot][0] = p2;
-    dist2_pyr_[slot][1] = has_distortion ? 1.0f : 0.0f;
+    dist2_pyr_[slot][1] = (float)lens_mode;
 }
 
 void GpuRenderer::render_frame_multi_pyramid(const std::vector<DmaBufFrame> &frames)

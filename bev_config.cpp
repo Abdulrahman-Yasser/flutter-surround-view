@@ -281,6 +281,8 @@ bool lens_calib_load(const std::string &path, BevSlotConfig &slot)
             else if (key == "k1") trial.k1 = std::stod(val);
             else if (key == "k2") trial.k2 = std::stod(val);
             else if (key == "k3") trial.k3 = std::stod(val);
+            else if (key == "k4") trial.k4 = std::stod(val);
+            else if (key == "model" && (val == "pinhole" || val == "fisheye")) trial.fisheye = val == "fisheye";
             else if (key == "p1") trial.p1 = std::stod(val);
             else if (key == "p2") trial.p2 = std::stod(val);
             else if (key == "calib_w") { trial.lens_calib_w = std::stoi(val); have_w = true; }
@@ -308,7 +310,8 @@ bool lens_calib_load(const std::string &path, BevSlotConfig &slot)
     // scratch one main.cpp fills in separately), which a wholesale
     // `slot = trial` would clobber back to BevSlotConfig{}'s defaults.
     slot.fx = trial.fx; slot.fy = trial.fy; slot.cx = trial.cx; slot.cy = trial.cy;
-    slot.k1 = trial.k1; slot.k2 = trial.k2; slot.k3 = trial.k3;
+    slot.k1 = trial.k1; slot.k2 = trial.k2; slot.k3 = trial.k3; slot.k4 = trial.k4;
+    slot.fisheye = trial.fisheye;
     slot.p1 = trial.p1; slot.p2 = trial.p2;
     slot.lens_calib_w = trial.lens_calib_w;
     slot.lens_calib_h = trial.lens_calib_h;

@@ -13,18 +13,20 @@ class CharucoModel;
 
 struct CalibPoint {
     int         board = 0;       // index into CalibLayout::boards
-    int         corner = 0;      // ChArUco corner id within that board
+    int         corner = 0;      // ChArUco corner id, or 0..3 clockwise from top-left on a square
     cv::Point2f image;           // raw (distorted) frame pixel, what the user drags
     cv::Point2d world;           // car frame, metres
     bool        moved = false;   // edited by hand after detection
     bool        inlier = false;  // survived the last solve's RANSAC
+    bool        guessed = false; // a square corner the detector missed, placed where it should be;
+                                 // left out of the solve until the user moves it
 };
 
 struct CalibSolve {
     bool        ok = false;
     cv::Matx33d hb2i;            // car metres -> undistorted pixels at the image's own size
     int         inliers = 0;
-    double      rms_px = 0, max_px = 0;            // reprojection over inliers
+    double      rms_px = 0, max_px = 0;            // reprojection over inliers, raw pixels
     double      ground_rms_mm = 0, ground_max_mm = 0;
 };
 
@@ -47,11 +49,15 @@ public:
     int cameras() const { return (int)layout_.cameras.size(); }
 
     bool has_lens(int cam) const;
+    // Switches cam to "<lens_dir>/<lens>-lens.ini" (empty: none), which is
+    // also the lens_model apply() writes. Throws on a malformed file.
+    void set_lens(int cam, const std::string &lens_dir, const std::string &lens);
 
     void set_image(int cam, const cv::Mat &bgr);
     const cv::Mat &image(int cam) const;
 
     // Replaces cam's points with a fresh detection; returns how many corners.
+    // Squares are searched where the ChArUco corners found here put them.
     int detect(int cam);
     const std::vector<CalibPoint> &points(int cam) const;
     void move_point(int cam, int idx, cv::Point2f image_px);
@@ -70,7 +76,11 @@ public:
 private:
     struct Cam;
 
-    std::vector<cv::Point2f> undistorted(int cam, const std::vector<cv::Point2f> &raw) const;
+    bool fit(int cam, cv::Matx33d &H, std::vector<bool> &inlier) const;
+    bool find_charuco(int cam, int board, const cv::Matx33d &H, std::vector<cv::Point2f> &corners,
+                      std::vector<int> &ids) const;
+    bool find_square(int cam, int board, const cv::Matx33d &H, std::vector<cv::Point2f> &corners,
+                     bool &found) const;
 
     CalibLayout layout_;
     std::vector<std::unique_ptr<CharucoModel>> boards_;

@@ -448,11 +448,11 @@ bool BevPipeline::init_surround()
             cyn = (float)sc.cy * sy / (float)slot.height;
         }
         if (pyramid_)
-            renderer_->set_distortion_multi_pyramid(i, sc.has_distortion, fxn, fyn, cxn, cyn,
-                (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)sc.p1, (float)sc.p2);
+            renderer_->set_distortion_multi_pyramid(i, lens_mode(sc), fxn, fyn, cxn, cyn,
+                (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)(sc.fisheye ? sc.k4 : sc.p1), (float)sc.p2);
         else
-            renderer_->set_distortion_multi(i, sc.has_distortion, fxn, fyn, cxn, cyn,
-                (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)sc.p1, (float)sc.p2);
+            renderer_->set_distortion_multi(i, lens_mode(sc), fxn, fyn, cxn, cyn,
+                (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)(sc.fisheye ? sc.k4 : sc.p1), (float)sc.p2);
 
         mat3 H = measured_H(sc, px_per_m, canvas_w, canvas_h);
         float Hf[9];

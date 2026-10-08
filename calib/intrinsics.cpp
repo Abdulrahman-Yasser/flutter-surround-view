@@ -9,8 +9,8 @@
 #include <fstream>
 #include <set>
 
-IntrinsicsCalib::IntrinsicsCalib(const CalibBoard &board, int min_corners)
-    : board_(std::make_unique<CharucoModel>(board)), min_corners_(min_corners)
+IntrinsicsCalib::IntrinsicsCalib(const CalibBoard &board, bool fisheye, int min_corners)
+    : board_(std::make_unique<CharucoModel>(board)), fisheye_(fisheye), min_corners_(min_corners)
 {
 }
 
@@ -64,13 +64,24 @@ IntrinsicsResult IntrinsicsCalib::calibrate() const
 
     cv::Mat K, dist;
     std::vector<cv::Mat> rvecs, tvecs;
-    cv::calibrateCamera(obj, img, size_, K, dist, rvecs, tvecs);
+    if (fisheye_) {
+        cv::Matx33d Kf;
+        cv::Vec4d Df;
+        cv::fisheye::calibrate(obj, img, size_, Kf, Df, rvecs, tvecs,
+                               cv::fisheye::CALIB_RECOMPUTE_EXTRINSIC | cv::fisheye::CALIB_FIX_SKEW,
+                               cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 100, 1e-9));
+        K = cv::Mat(Kf);
+        dist = cv::Mat(Df);
+    } else {
+        cv::calibrateCamera(obj, img, size_, K, dist, rvecs, tvecs);
+    }
 
     double sq = 0;
     size_t n = 0;
     for (size_t i = 0; i < obj.size(); ++i) {
         std::vector<cv::Point2f> proj;
-        cv::projectPoints(obj[i], rvecs[i], tvecs[i], K, dist, proj);
+        if (fisheye_) cv::fisheye::projectPoints(obj[i], proj, rvecs[i], tvecs[i], K, dist);
+        else          cv::projectPoints(obj[i], rvecs[i], tvecs[i], K, dist, proj);
         double view_sq = 0;
         for (size_t j = 0; j < proj.size(); ++j) {
             cv::Point2f d = img[i][j] - proj[j];
@@ -82,6 +93,7 @@ IntrinsicsResult IntrinsicsCalib::calibrate() const
     }
 
     r.ok = true;
+    r.fisheye = fisheye_;
     r.image_w = size_.width;
     r.image_h = size_.height;
     r.views = (int)shots_.size();
@@ -91,7 +103,11 @@ IntrinsicsResult IntrinsicsCalib::calibrate() const
     r.cx = K.at<double>(0, 2);
     r.cy = K.at<double>(1, 2);
     const double *d = dist.ptr<double>();
-    r.k1 = d[0]; r.k2 = d[1]; r.p1 = d[2]; r.p2 = d[3]; r.k3 = d[4];
+    if (fisheye_) {
+        r.k1 = d[0]; r.k2 = d[1]; r.k3 = d[2]; r.k4 = d[3];
+    } else {
+        r.k1 = d[0]; r.k2 = d[1]; r.p1 = d[2]; r.p2 = d[3]; r.k3 = d[4];
+    }
     return r;
 }
 
@@ -102,9 +118,11 @@ bool IntrinsicsCalib::save_lens_ini(const std::string &path, const IntrinsicsRes
     f.precision(7);
     f << "# lens intrinsics/distortion, written by the calibration screen\n"
       << "# looked up at runtime as <lens_dir>/<lens_model>-lens.ini\n\n"
+      << "model = " << (r.fisheye ? "fisheye" : "pinhole") << "\n"
       << "fx = " << r.fx << "\nfy = " << r.fy << "\ncx = " << r.cx << "\ncy = " << r.cy << "\n"
-      << "k1 = " << r.k1 << "\nk2 = " << r.k2 << "\nk3 = " << r.k3 << "\n"
-      << "p1 = " << r.p1 << "\np2 = " << r.p2 << "\n"
-      << "calib_w = " << r.image_w << "\ncalib_h = " << r.image_h << "\n";
+      << "k1 = " << r.k1 << "\nk2 = " << r.k2 << "\nk3 = " << r.k3 << "\n";
+    if (r.fisheye) f << "k4 = " << r.k4 << "\n";
+    else           f << "p1 = " << r.p1 << "\np2 = " << r.p2 << "\n";
+    f << "calib_w = " << r.image_w << "\ncalib_h = " << r.image_h << "\n";
     return (bool)f;
 }

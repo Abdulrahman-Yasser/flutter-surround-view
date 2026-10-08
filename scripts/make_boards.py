@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Render every ChArUco board a calibration layout needs as a print-ready PDF.
+"""Render every board a calibration layout needs as a print-ready PDF.
 
-Each board gets its own marker id range (first_id in the layout), so the
-boards are not interchangeable: print each file once and lay it where the
+Each ChArUco board gets its own marker id range (first_id in the layout), so
+the boards are not interchangeable: print each file once and lay it where the
 layout's diagram puts it. Print at 100% / "actual size"; a 6x8 board of
-90 mm squares is 540 x 720 mm, a poster print.
+90 mm squares is 540 x 720 mm, a poster print. A plain square (type = square)
+is a black square with a white border; any matte black square of the right
+size, such as painted board, works as well.
 
 Usage:
     python3 make_boards.py ../flutter/bev_calib/layouts/four_cam.ini [--out boards/] [--dpi 300]
@@ -35,8 +37,12 @@ def read_boards(path):
         if not name.startswith("board"):
             continue
         s = cp[name]
+        if s.get("type", "charuco") == "square":
+            boards.append(dict(plain=True, size=float(s["size"])))
+            continue
         sx, sy = (int(v) for v in s.get("squares", "6x8").lower().split("x"))
         boards.append(dict(
+            plain=False,
             dict=s.get("dict", "4X4_50"),
             squares_x=sx,
             squares_y=sy,
@@ -48,7 +54,19 @@ def read_boards(path):
     return boards
 
 
+def render_square(b, dpi):
+    px_per_m = dpi / 0.0254
+    side = round(b["size"] * px_per_m)
+    margin = round(4 * MARGIN_MM / 1000 * px_per_m)
+    page = Image.new("L", (side + 2 * margin, side + 2 * margin), 255)
+    ImageDraw.Draw(page).rectangle([margin, margin, margin + side - 1, margin + side - 1], fill=0)
+    ImageDraw.Draw(page).text((margin, margin // 3), f"square {b['size'] * 1000:g} mm", fill=0)
+    return page
+
+
 def render(b, dpi):
+    if b["plain"]:
+        return render_square(b, dpi)
     px_per_m = dpi / 0.0254
     d = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, "DICT_" + b["dict"]))
     n = b["squares_x"] * b["squares_y"] // 2
@@ -78,7 +96,10 @@ def main():
     args.out.mkdir(parents=True, exist_ok=True)
     for b in read_boards(args.layout):
         page = render(b, args.dpi)
-        path = args.out / f"charuco_{b['dict']}_id{b['first_id']}_{b['squares_x']}x{b['squares_y']}.pdf"
+        if b["plain"]:
+            path = args.out / f"square_{b['size'] * 1000:g}mm.pdf"
+        else:
+            path = args.out / f"charuco_{b['dict']}_id{b['first_id']}_{b['squares_x']}x{b['squares_y']}.pdf"
         page.save(path, resolution=args.dpi)
         mm = (page.width / args.dpi * 25.4, page.height / args.dpi * 25.4)
         print(f"wrote {path}  ({mm[0]:.0f} x {mm[1]:.0f} mm)")

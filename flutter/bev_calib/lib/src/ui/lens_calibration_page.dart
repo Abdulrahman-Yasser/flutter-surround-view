@@ -32,6 +32,7 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
   int? _cameras;
   int _camera = 0;
   final _lens = TextEditingController(text: 'imx219');
+  bool _fisheye = false;
   late final _squares = TextEditingController(text: '${widget.board.squaresX}x${widget.board.squaresY}');
   late final _square = TextEditingController(text: (widget.board.squareLen * 1000).toStringAsFixed(0));
   late final _marker = TextEditingController(text: (widget.board.markerLen * 1000).toStringAsFixed(0));
@@ -105,7 +106,7 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
     });
     try {
       await Directory(widget.paths.workDir).create(recursive: true);
-      _session = await IntrinsicsSession.open(_camera, board);
+      _session = await IntrinsicsSession.open(_camera, board, fisheye: _fisheye);
       _running = true;
       _loop = _grabLoop();
     } on CalibrationException catch (e) {
@@ -243,6 +244,17 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
           if (_cameras == 0) const Text('No camera found', style: TextStyle(color: _bad, fontSize: 12)),
           const SizedBox(height: 6),
           _field('Lens name (file <name>-lens.ini)', _lens),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: false, label: Text('Pinhole')),
+                ButtonSegment(value: true, label: Text('Fisheye')),
+              ],
+              selected: {_fisheye},
+              onSelectionChanged: (v) => setState(() => _fisheye = v.first),
+            ),
+          ),
           _field('Board squares (cols x rows)', _squares),
           Row(children: [
             Expanded(child: _field('Square mm', _square)),
@@ -256,7 +268,8 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
             child: Text(_error!, style: const TextStyle(color: _bad, fontSize: 12)),
           ),
         ] else ...[
-          Text('Camera $_camera · ${_lens.text.trim()}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text('Camera $_camera · ${_lens.text.trim()} · ${_fisheye ? 'fisheye' : 'pinhole'}',
+              style: const TextStyle(fontWeight: FontWeight.w700)),
           if (st != null) ...[
             Text('${st.width}x${st.height}', style: small),
             const SizedBox(height: 6),
@@ -269,9 +282,10 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
           LinearProgressIndicator(value: (views / _recommendedViews).clamp(0.0, 1.0)),
           Text('$views views kept (aim for $_recommendedViews+)', style: small),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Fill the frame with different poses: near and far, tilted, and in every corner '
-            'and edge. Orange dots show where earlier views covered.',
+            'and edge. Orange dots show where earlier views covered.'
+            '${_fisheye ? ' A fisheye needs the board right out at the rim too, or its edges stay unfit.' : ''}',
             style: small,
           ),
           const SizedBox(height: 10),
@@ -289,9 +303,14 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
             Text('worst view ${r.worstViewPx.toStringAsFixed(2)} px', style: small),
             Text('fx ${r.fx.toStringAsFixed(1)}  fy ${r.fy.toStringAsFixed(1)}', style: small),
             Text('cx ${r.cx.toStringAsFixed(1)}  cy ${r.cy.toStringAsFixed(1)}', style: small),
-            Text('k1 ${r.dist[0].toStringAsFixed(4)}  k2 ${r.dist[1].toStringAsFixed(4)}  k3 ${r.dist[4].toStringAsFixed(4)}',
-                style: small),
-            Text('p1 ${r.dist[2].toStringAsFixed(5)}  p2 ${r.dist[3].toStringAsFixed(5)}', style: small),
+            if (r.fisheye) ...[
+              Text('k1 ${r.dist[0].toStringAsFixed(4)}  k2 ${r.dist[1].toStringAsFixed(4)}', style: small),
+              Text('k3 ${r.dist[2].toStringAsFixed(4)}  k4 ${r.dist[3].toStringAsFixed(4)}', style: small),
+            ] else ...[
+              Text('k1 ${r.dist[0].toStringAsFixed(4)}  k2 ${r.dist[1].toStringAsFixed(4)}  k3 ${r.dist[4].toStringAsFixed(4)}',
+                  style: small),
+              Text('p1 ${r.dist[2].toStringAsFixed(5)}  p2 ${r.dist[3].toStringAsFixed(5)}', style: small),
+            ],
             const SizedBox(height: 6),
             FilledButton.icon(onPressed: _save, icon: const Icon(Icons.save), label: const Text('Save lens file')),
             Text('${widget.paths.lensDir}/${_lens.text.trim()}-lens.ini', style: small),

@@ -53,6 +53,8 @@ final class BevCalibBoardInfo extends Struct {
   external double y;
   @Double()
   external double yawDeg;
+  @Int32()
+  external int square;
 }
 
 final class BevCalibPoint extends Struct {
@@ -72,6 +74,8 @@ final class BevCalibPoint extends Struct {
   external int moved;
   @Int32()
   external int inlier;
+  @Int32()
+  external int guessed;
 }
 
 final class BevCalibSolve extends Struct {
@@ -146,6 +150,10 @@ final class BevIntrResult extends Struct {
   external double p2;
   @Double()
   external double k3;
+  @Int32()
+  external int fisheye;
+  @Double()
+  external double k4;
 }
 
 String charArrayToString(Array<Char> a, int length) {
@@ -182,6 +190,9 @@ external void bev_calib_close(Pointer<BevCalibSession> s);
 
 @Native<Int32 Function(Pointer<BevCalibSession>, Int32)>()
 external int bev_calib_has_lens(Pointer<BevCalibSession> s, int cam);
+
+@Native<Int32 Function(Pointer<BevCalibSession>, Int32, Pointer<Char>, Pointer<Char>)>()
+external int bev_calib_set_lens(Pointer<BevCalibSession> s, int cam, Pointer<Char> lensDir, Pointer<Char> lens);
 
 @Native<Int32 Function(Pointer<BevCalibSession>, Int32, Int32)>()
 external int bev_calib_capture(Pointer<BevCalibSession> s, int cam, int settleFrames);
@@ -222,9 +233,9 @@ external int bev_calib_render_preview(Pointer<BevCalibSession> s, double pxPerM,
 @Native<Int32 Function(Pointer<BevCalibSession>, Pointer<Char>)>()
 external int bev_calib_save_config(Pointer<BevCalibSession> s, Pointer<Char> configPath);
 
-@Native<Pointer<BevCalibIntrinsics> Function(Int32, Pointer<Char>, Int32, Int32, Double, Double, Int32)>()
+@Native<Pointer<BevCalibIntrinsics> Function(Int32, Pointer<Char>, Int32, Int32, Double, Double, Int32, Int32)>()
 external Pointer<BevCalibIntrinsics> bev_intr_open(int cameraIndex, Pointer<Char> dict, int squaresX,
-    int squaresY, double squareLen, double markerLen, int legacy);
+    int squaresY, double squareLen, double markerLen, int legacy, int fisheye);
 
 @Native<Void Function(Pointer<BevCalibIntrinsics>)>()
 external void bev_intr_close(Pointer<BevCalibIntrinsics> h);

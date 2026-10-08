@@ -568,11 +568,11 @@ static int run_multi_file_mode(const std::vector<std::string> &paths,
             cyn = (float)sc.cy * sy / (float)f.height;
         }
         if (blend_mode == BlendMode::Pyramid)
-            renderer.set_distortion_multi_pyramid(i, sc.has_distortion, fxn, fyn, cxn, cyn,
-                (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)sc.p1, (float)sc.p2);
+            renderer.set_distortion_multi_pyramid(i, lens_mode(sc), fxn, fyn, cxn, cyn,
+                (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)(sc.fisheye ? sc.k4 : sc.p1), (float)sc.p2);
         else
-            renderer.set_distortion_multi(i, sc.has_distortion, fxn, fyn, cxn, cyn,
-                (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)sc.p1, (float)sc.p2);
+            renderer.set_distortion_multi(i, lens_mode(sc), fxn, fyn, cxn, cyn,
+                (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)(sc.fisheye ? sc.k4 : sc.p1), (float)sc.p2);
     };
 
     // Looks up "<lens_dir>/<model>-lens.ini", and on success writes its
@@ -603,8 +603,9 @@ static int run_multi_file_mode(const std::vector<std::string> &paths,
         }
         sc.lens_model = model;
         sc.fx = trial.fx; sc.fy = trial.fy; sc.cx = trial.cx; sc.cy = trial.cy;
-        sc.k1 = trial.k1; sc.k2 = trial.k2; sc.k3 = trial.k3;
+        sc.k1 = trial.k1; sc.k2 = trial.k2; sc.k3 = trial.k3; sc.k4 = trial.k4;
         sc.p1 = trial.p1; sc.p2 = trial.p2;
+        sc.fisheye = trial.fisheye;
         sc.lens_calib_w = trial.lens_calib_w;
         sc.lens_calib_h = trial.lens_calib_h;
         sc.has_distortion = true;

@@ -83,6 +83,17 @@ class _LayoutPainter extends CustomPainter {
     for (final b in layout.boards) {
       final c = _boardCorners(b).map((p) => px(p.dx, p.dy)).toList();
       final path = Path()..addPolygon(c, true);
+      if (b.square) {
+        canvas.drawPath(path, Paint()..color = Colors.black);
+        canvas.drawPath(
+            path,
+            Paint()
+              ..color = _boardColor
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1);
+        _label(canvas, 'square', (c[0] + c[2]) / 2, 10);
+        continue;
+      }
       canvas.drawPath(path, Paint()..color = _boardColor.withValues(alpha: 0.25));
       canvas.drawPath(
           path,

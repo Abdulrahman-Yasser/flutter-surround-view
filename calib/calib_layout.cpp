@@ -40,17 +40,30 @@ static bool validate(const std::string &path, const CalibLayout &l)
             return false;
         }
     }
+    bool charuco = false;
+    for (const CalibBoard &b : l.boards) charuco |= !b.square;
+    if (!charuco) {
+        std::cerr << "[layout] " << path << ": needs at least one ChArUco board to locate the squares\n";
+        return false;
+    }
     // Two boards sharing a dictionary must not share marker ids, or a corner
     // could not be attributed to one board.
     for (size_t i = 0; i < l.boards.size(); ++i) {
         const CalibBoard &a = l.boards[i];
+        if (a.square) {
+            if (a.square_len <= 0) {
+                std::cerr << "[layout] " << path << ": board " << i << " needs a size\n";
+                return false;
+            }
+            continue;
+        }
         if (a.marker_len <= 0 || a.marker_len >= a.square_len) {
             std::cerr << "[layout] " << path << ": board " << i << " marker must be smaller than square\n";
             return false;
         }
         for (size_t j = i + 1; j < l.boards.size(); ++j) {
             const CalibBoard &b = l.boards[j];
-            if (a.dict != b.dict) continue;
+            if (b.square || a.dict != b.dict) continue;
             if (a.first_id < b.first_id + b.markers() && b.first_id < a.first_id + a.markers()) {
                 std::cerr << "[layout] " << path << ": boards " << i << " and " << j
                           << " overlap in marker ids of " << a.dict << "\n";
@@ -109,7 +122,9 @@ bool calib_layout_load(const std::string &path, CalibLayout &out)
                 else ok = false;
             } else {
                 CalibBoard &b = out.boards.back();
-                if      (key == "dict")     b.dict = val;
+                if      (key == "type" && (val == "charuco" || val == "square")) b.square = val == "square";
+                else if (key == "size")     b.square_len = std::stod(val);
+                else if (key == "dict")     b.dict = val;
                 else if (key == "squares")  ok = parse_squares(val, b.squares_x, b.squares_y);
                 else if (key == "square")   b.square_len = std::stod(val);
                 else if (key == "marker")   b.marker_len = std::stod(val);
@@ -127,6 +142,11 @@ bool calib_layout_load(const std::string &path, CalibLayout &out)
             std::cerr << "[layout] " << path << ":" << lineno << ": bad line '" << line << "'\n";
             return false;
         }
+    }
+    for (CalibBoard &b : out.boards) {
+        if (!b.square) continue;
+        b.squares_x = b.squares_y = 1;
+        b.marker_len = 0;
     }
     return validate(path, out);
 }

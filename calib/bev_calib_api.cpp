@@ -117,6 +117,7 @@ int32_t bev_calib_layout_board(const char *path, int32_t index, BevCalibBoardInf
     out->x = b.x;
     out->y = b.y;
     out->yaw_deg = b.yaw_deg;
+    out->square = b.square;
     return 1;
 }
 
@@ -144,6 +145,16 @@ int32_t bev_calib_has_lens(BevCalibSession *s, int32_t cam)
     if (bad_cam(s, cam)) return 0;
     std::lock_guard<std::mutex> lock(s->mutex);
     return s->session->has_lens(cam);
+}
+
+int32_t bev_calib_set_lens(BevCalibSession *s, int32_t cam, const char *lens_dir, const char *lens)
+{
+    if (bad_cam(s, cam)) return 0;
+    std::lock_guard<std::mutex> lock(s->mutex);
+    return guarded([&] {
+        s->session->set_lens(cam, lens_dir ? lens_dir : ".", lens ? lens : "");
+        return 1;
+    });
 }
 
 int32_t bev_calib_capture(BevCalibSession *s, int32_t cam, int32_t settle_frames)
@@ -225,6 +236,7 @@ int32_t bev_calib_point(BevCalibSession *s, int32_t cam, int32_t index, BevCalib
     out->corner = p.corner;
     out->moved = p.moved;
     out->inlier = p.inlier;
+    out->guessed = p.guessed;
     return 1;
 }
 
@@ -297,7 +309,8 @@ int32_t bev_calib_save_config(BevCalibSession *s, const char *config_path)
 }
 
 BevCalibIntrinsics *bev_intr_open(int32_t camera_index, const char *dict, int32_t squares_x,
-                                  int32_t squares_y, double square_len, double marker_len, int32_t legacy)
+                                  int32_t squares_y, double square_len, double marker_len, int32_t legacy,
+                                  int32_t fisheye)
 {
     CalibBoard b;
     b.dict = dict;
@@ -308,7 +321,7 @@ BevCalibIntrinsics *bev_intr_open(int32_t camera_index, const char *dict, int32_
     b.legacy = legacy != 0;
     try {
         auto h = std::make_unique<BevCalibIntrinsics>();
-        h->calib = std::make_unique<IntrinsicsCalib>(b);
+        h->calib = std::make_unique<IntrinsicsCalib>(b, fisheye != 0);
         h->camera = std::make_unique<StillCamera>(camera_index);
         return h.release();
     } catch (const std::exception &e) {
@@ -370,7 +383,7 @@ int32_t bev_intr_calibrate(BevCalibIntrinsics *h, BevIntrResult *out)
         h->result = h->calib->calibrate();
         const IntrinsicsResult &r = h->result;
         *out = BevIntrResult{r.ok, r.image_w, r.image_h, r.views, r.rms_px, r.worst_view_px,
-                             r.fx, r.fy, r.cx, r.cy, r.k1, r.k2, r.p1, r.p2, r.k3};
+                             r.fx, r.fy, r.cx, r.cy, r.k1, r.k2, r.p1, r.p2, r.k3, r.fisheye, r.k4};
         return r.ok ? 1 : fail("need at least 3 views");
     });
 }

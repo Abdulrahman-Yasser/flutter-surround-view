@@ -8,8 +8,10 @@ import '../calibration.dart';
 const pinInlier = Color(0xFF43C46B);
 const pinOutlier = Color(0xFFE5484D);
 const pinMoved = Color(0xFFFFB224);
+const pinGuessed = Color(0xFF9AA0A6);
 
-Color pinColor(CalibPointInfo p) => !p.inlier ? pinOutlier : (p.moved ? pinMoved : pinInlier);
+Color pinColor(CalibPointInfo p) =>
+    p.guessed ? pinGuessed : (!p.inlier ? pinOutlier : (p.moved ? pinMoved : pinInlier));
 
 /// A captured still with a pin on every detected corner. Tap selects the
 /// nearest pin; dragging moves it with a magnifier above the finger. Edits

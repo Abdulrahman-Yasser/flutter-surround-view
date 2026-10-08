@@ -3,7 +3,7 @@
 //
 //   bev-calib <layout.ini> <cam0.png> [<cam1.png> ...] [--lens-dir DIR]
 //             [--preview out.png] [--ppm N] [--overlay-dir DIR]
-//   bev-calib --intrinsics <layout.ini> <photo...> [--lens-out file]
+//   bev-calib --intrinsics <layout.ini> <photo...> [--lens-out file] [--fisheye]
 //             (lens calibration against the layout's first board)
 
 #include "calib_session.h"
@@ -23,14 +23,14 @@ static void usage()
     std::fprintf(stderr,
         "usage: bev-calib <layout.ini> <image per [camera] in order...>\n"
         "                 [--lens-dir DIR] [--preview out.png] [--ppm N] [--overlay-dir DIR]\n"
-        "       bev-calib --intrinsics <layout.ini> <photo...> [--lens-out file]\n");
+        "       bev-calib --intrinsics <layout.ini> <photo...> [--lens-out file] [--fisheye]\n");
 }
 
-static int run_intrinsics(const std::vector<std::string> &pos, const std::string &lens_out)
+static int run_intrinsics(const std::vector<std::string> &pos, const std::string &lens_out, bool fisheye)
 {
     CalibLayout layout;
     if (!calib_layout_load(pos[0], layout)) return 1;
-    IntrinsicsCalib calib(layout.boards[0]);
+    IntrinsicsCalib calib(layout.boards[0], fisheye);
     for (size_t i = 1; i < pos.size(); ++i) {
         cv::Mat img = cv::imread(pos[i]);
         if (img.empty()) {
@@ -48,8 +48,9 @@ static int run_intrinsics(const std::vector<std::string> &pos, const std::string
     }
     std::printf("%d views at %dx%d: rms=%.3fpx worst view=%.3fpx\n", r.views, r.image_w, r.image_h,
                 r.rms_px, r.worst_view_px);
-    std::printf("fx=%.2f fy=%.2f cx=%.2f cy=%.2f\nk1=%.5f k2=%.5f p1=%.5f p2=%.5f k3=%.5f\n",
-                r.fx, r.fy, r.cx, r.cy, r.k1, r.k2, r.p1, r.p2, r.k3);
+    std::printf("fx=%.2f fy=%.2f cx=%.2f cy=%.2f\n", r.fx, r.fy, r.cx, r.cy);
+    if (fisheye) std::printf("fisheye k1=%.5f k2=%.5f k3=%.5f k4=%.5f\n", r.k1, r.k2, r.k3, r.k4);
+    else         std::printf("k1=%.5f k2=%.5f p1=%.5f p2=%.5f k3=%.5f\n", r.k1, r.k2, r.p1, r.p2, r.k3);
     if (!lens_out.empty()) {
         if (!IntrinsicsCalib::save_lens_ini(lens_out, r)) return 1;
         std::printf("wrote %s\n", lens_out.c_str());
@@ -61,7 +62,7 @@ int main(int argc, char **argv)
 {
     std::vector<std::string> pos;
     std::string lens_dir = ".", preview, overlay_dir, lens_out;
-    bool intrinsics = false;
+    bool intrinsics = false, fisheye = false;
     double ppm = 200.0;
     for (int i = 1; i < argc; ++i) {
         auto next = [&]() -> std::string {
@@ -74,13 +75,14 @@ int main(int argc, char **argv)
         else if (!std::strcmp(argv[i], "--overlay-dir")) overlay_dir = next();
         else if (!std::strcmp(argv[i], "--lens-out"))    lens_out = next();
         else if (!std::strcmp(argv[i], "--intrinsics"))  intrinsics = true;
+        else if (!std::strcmp(argv[i], "--fisheye"))     fisheye = true;
         else if (argv[i][0] == '-') { usage(); return 2; }
         else pos.push_back(argv[i]);
     }
     if (pos.size() < 2) { usage(); return 2; }
     if (intrinsics) {
         try {
-            return run_intrinsics(pos, lens_out);
+            return run_intrinsics(pos, lens_out, fisheye);
         } catch (const std::exception &e) {
             std::fprintf(stderr, "error: %s\n", e.what());
             return 1;
@@ -126,7 +128,9 @@ int main(int argc, char **argv)
             if (!overlay_dir.empty()) {
                 cv::Mat o = img.clone();
                 for (const CalibPoint &p : s.points(c))
-                    cv::circle(o, p.image, 6, p.inlier ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255), 2);
+                    cv::circle(o, p.image, 6, p.guessed  ? cv::Scalar(160, 160, 160)
+                                              : p.inlier ? cv::Scalar(0, 255, 0)
+                                                         : cv::Scalar(0, 0, 255), 2);
                 cv::imwrite(overlay_dir + "/cam" + std::to_string(c) + "_corners.png", o);
             }
         }

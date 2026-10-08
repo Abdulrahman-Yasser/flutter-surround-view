@@ -180,6 +180,16 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
     });
   }
 
+  Future<void> _setLens(int i, String lens) async {
+    try {
+      _session!.setLens(i, lens);
+    } on CalibrationException catch (e) {
+      _toast('$e');
+      return;
+    }
+    await _redetect(i);
+  }
+
   Future<void> _retake(int i) async {
     setState(() => _busy = 'Capturing camera ${i + 1}');
     await _capture(i);
@@ -429,7 +439,10 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
     final sel = _selected == null || _selected! >= cam.points.length ? null : cam.points[_selected!];
     final last = _cams.lastIndexWhere((c) => c.image != null) == _cam;
     final edited = cam.points.any((p) => p.moved);
-    final outliers = cam.points.where((p) => !p.inlier).length;
+    final outliers = cam.points.where((p) => !p.inlier && !p.guessed).length;
+    final guessed = cam.points.where((p) => p.guessed).length;
+    final lenses = LensFile.list(_paths.lensDir);
+    final lens = _session!.lenses[_cam];
     const small = TextStyle(color: Colors.white70, fontSize: 12);
 
     return Container(
@@ -455,19 +468,36 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
                 ),
             ]),
             const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              key: ValueKey('lens$_cam'),
+              initialValue: lens,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Lens', isDense: true, border: OutlineInputBorder()),
+              items: [
+                const DropdownMenuItem(value: '', child: Text('None (no undistortion)')),
+                for (final l in lenses)
+                  DropdownMenuItem(value: l.name, child: Text('${l.name} · ${l.fisheye ? 'fisheye' : 'pinhole'}')),
+                if (lens.isNotEmpty && !lenses.any((l) => l.name == lens))
+                  DropdownMenuItem(value: lens, child: Text('$lens (no file yet)')),
+              ],
+              onChanged: (v) => _setLens(_cam, v ?? ''),
+            ),
+            const SizedBox(height: 6),
             if (!_session!.hasLens(_cam))
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
-                  _layout!.cameras[_cam].lens.isEmpty
-                      ? 'This layout names no lens for this camera, so corners are used without '
-                          'undistortion.'
-                      : 'No lens file for "${_layout!.cameras[_cam].lens}" yet, so corners are used '
-                          'without undistortion. Run lens calibration first for the best result.',
+                  lens.isEmpty
+                      ? 'No lens for this camera, so corners are used without undistortion.'
+                      : 'No lens file for "$lens" yet, so corners are used without undistortion. '
+                          'Run lens calibration first for the best result.',
                   style: const TextStyle(color: _warn, fontSize: 12),
                 ),
               ),
             Text('${cam.points.length} corners · ${s.inliers} inliers · $outliers outliers', style: small),
+            if (guessed > 0)
+              Text('$guessed square corners not found: drag each grey pin onto its corner',
+                  style: const TextStyle(color: _warn, fontSize: 12)),
             if (s.ok) ...[
               Text('Reprojection ${s.rmsPx.toStringAsFixed(2)} px (max ${s.maxPx.toStringAsFixed(1)})',
                   style: small),
@@ -480,13 +510,18 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
               _Legend(pinInlier, 'ok'),
               _Legend(pinOutlier, 'outlier'),
               _Legend(pinMoved, 'moved, ok'),
+              _Legend(pinGuessed, 'not found'),
             ]),
             const Divider(),
             if (sel == null)
-              const Text('Tap a pin to select it, drag it onto the corner where two black squares meet.',
+              const Text(
+                  'Tap a pin to select it, drag it onto the corner where two black squares meet, '
+                  'or onto the corner of a black square.',
                   style: small)
             else ...[
-              Text('Board ${sel.board} · corner ${sel.corner} · ${sel.moved ? 'moved' : (sel.inlier ? 'ok' : 'outlier')}',
+              Text(
+                  'Board ${sel.board} · corner ${sel.corner} · '
+                  '${sel.guessed ? 'not found' : sel.moved ? 'moved' : (sel.inlier ? 'ok' : 'outlier')}',
                   style: small),
               const SizedBox(height: 6),
               _NudgePad(onNudge: _nudge),
@@ -497,7 +532,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
               IconButton(onPressed: () => _stepPoint(1), icon: const Icon(Icons.chevron_right), tooltip: 'Next pin'),
               const Spacer(),
               TextButton(
-                onPressed: outliers == 0 ? null : () => _stepPoint(1, outliersOnly: true),
+                onPressed: outliers + guessed == 0 ? null : () => _stepPoint(1, outliersOnly: true),
                 child: const Text('Next outlier'),
               ),
             ]),

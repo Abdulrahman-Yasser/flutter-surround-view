@@ -18,3 +18,9 @@ mat3 measured_H(const BevSlotConfig &slot, double px_per_m, int bev_w, int bev_h
 // hyphenation normalization -- so "imx219" and "imx-219" are two different
 // files, consistently with whatever the user actually typed/saved.
 std::string lens_calib_path(const std::string &lens_dir, const std::string &lens_model);
+
+// The renderer's distortion switch: 0 none, 1 pinhole, 2 fisheye.
+inline int lens_mode(const BevSlotConfig &slot)
+{
+    return slot.has_distortion ? (slot.fisheye ? 2 : 1) : 0;
+}

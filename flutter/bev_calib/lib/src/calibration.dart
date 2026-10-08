@@ -51,6 +51,7 @@ class LayoutCamera {
 
 class LayoutBoard {
   const LayoutBoard({
+    required this.square,
     required this.dict,
     required this.squaresX,
     required this.squaresY,
@@ -62,6 +63,8 @@ class LayoutBoard {
     required this.yawDeg,
   });
 
+  /// A plain black square of side [squareLen], with no markers.
+  final bool square;
   final String dict;
   final int squaresX, squaresY, firstId;
   final double squareLen, markerLen;
@@ -101,6 +104,7 @@ class CalibLayout {
         for (var i = 0; i < info.ref.boards; i++) {
           _check(bev_calib_layout_board(p, i, b));
           boards.add(LayoutBoard(
+            square: b.ref.square != 0,
             dict: charArrayToString(b.ref.dict, 32),
             squaresX: b.ref.squaresX,
             squaresY: b.ref.squaresY,
@@ -147,6 +151,7 @@ class CalibPointInfo {
     required this.corner,
     required this.moved,
     required this.inlier,
+    required this.guessed,
   });
 
   final int index;
@@ -154,6 +159,37 @@ class CalibPointInfo {
   final double worldX, worldY;
   final int board, corner;
   final bool moved, inlier;
+
+  /// A square corner the detector missed, placed where it should be. It
+  /// counts once the user drags it onto the real corner.
+  final bool guessed;
+}
+
+class LensFile {
+  const LensFile(this.name, this.fisheye);
+
+  final String name;
+  final bool fisheye;
+
+  /// The `<name>-lens.ini` files in [dir], by name.
+  static List<LensFile> list(String dir) {
+    final d = Directory(dir);
+    if (!d.existsSync()) return const [];
+    final out = <LensFile>[];
+    for (final f in d.listSync().whereType<File>()) {
+      final base = f.uri.pathSegments.last;
+      if (!base.endsWith('-lens.ini')) continue;
+      var fisheye = false;
+      try {
+        fisheye = f.readAsLinesSync().any((l) => RegExp(r'^\s*model\s*=\s*fisheye\b').hasMatch(l));
+      } on FileSystemException {
+        continue;
+      }
+      out.add(LensFile(base.substring(0, base.length - '-lens.ini'.length), fisheye));
+    }
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
+  }
 }
 
 class SolveResult {
@@ -189,10 +225,15 @@ class SeamResult {
 /// One surround calibration run over a [CalibLayout]. Cameras are indexed in
 /// layout order. Slow calls run on a background isolate.
 class CalibrationSession {
-  CalibrationSession._(this._address, this.layout);
+  CalibrationSession._(this._address, this.layout, this.lensDir)
+      : lenses = [for (final c in layout.cameras) c.lens];
 
   final int _address;
   final CalibLayout layout;
+  final String lensDir;
+
+  /// Each camera's lens name, the layout's until [setLens] changes it.
+  final List<String> lenses;
   bool _closed = false;
 
   Pointer<BevCalibSession> get _h {
@@ -203,10 +244,17 @@ class CalibrationSession {
   static CalibrationSession open(CalibLayout layout, {required String lensDir}) {
     final h = _withString(layout.path, (lp) => _withString(lensDir, (ld) => bev_calib_open(lp, ld)));
     if (h == nullptr) throw CalibrationException(_lastError());
-    return CalibrationSession._(h.address, layout);
+    return CalibrationSession._(h.address, layout, lensDir);
   }
 
   bool hasLens(int cam) => bev_calib_has_lens(_h, cam) == 1;
+
+  /// Uses `<lensDir>/<lens>-lens.ini` for [cam] (empty: none). Detect again
+  /// afterwards; the lens changes where boards are searched for.
+  void setLens(int cam, String lens) {
+    _withString(lensDir, (d) => _withString(lens, (l) => _check(bev_calib_set_lens(_h, cam, d, l))));
+    lenses[cam] = lens;
+  }
 
   Future<void> capture(int cam, {int settleFrames = 20}) {
     final a = _h.address;
@@ -259,6 +307,7 @@ class CalibrationSession {
               corner: p.ref.corner,
               moved: p.ref.moved != 0,
               inlier: p.ref.inlier != 0,
+              guessed: p.ref.guessed != 0,
             ),
       ];
     });
@@ -352,6 +401,7 @@ class IntrinsicsStatus {
 
 class IntrinsicsResult {
   const IntrinsicsResult({
+    required this.fisheye,
     required this.imageW,
     required this.imageH,
     required this.views,
@@ -364,10 +414,11 @@ class IntrinsicsResult {
     required this.dist,
   });
 
+  final bool fisheye;
   final int imageW, imageH, views;
   final double rmsPx, worstViewPx;
   final double fx, fy, cx, cy;
-  final List<double> dist; // k1, k2, p1, p2, k3
+  final List<double> dist; // k1, k2, p1, p2, k3; fisheye: k1, k2, k3, k4
 }
 
 /// Lens calibration on one live camera. Keep at most one call in flight.
@@ -379,10 +430,10 @@ class IntrinsicsSession {
 
   Pointer<BevCalibIntrinsics> get _h => Pointer<BevCalibIntrinsics>.fromAddress(_address);
 
-  static Future<IntrinsicsSession> open(int camera, BoardSpec board) async {
+  static Future<IntrinsicsSession> open(int camera, BoardSpec board, {bool fisheye = false}) async {
     final address = await Isolate.run(() => _withString(board.dict, (d) {
           final h = bev_intr_open(camera, d, board.squaresX, board.squaresY, board.squareLen,
-              board.markerLen, board.legacy ? 1 : 0);
+              board.markerLen, board.legacy ? 1 : 0, fisheye ? 1 : 0);
           if (h == nullptr) throw CalibrationException(_lastError());
           return h.address;
         }));
@@ -415,6 +466,7 @@ class IntrinsicsSession {
           _check(bev_intr_calibrate(Pointer.fromAddress(a), r));
           final v = r.ref;
           return IntrinsicsResult(
+            fisheye: v.fisheye != 0,
             imageW: v.imageW,
             imageH: v.imageH,
             views: v.views,
@@ -424,7 +476,7 @@ class IntrinsicsSession {
             fy: v.fy,
             cx: v.cx,
             cy: v.cy,
-            dist: [v.k1, v.k2, v.p1, v.p2, v.k3],
+            dist: v.fisheye != 0 ? [v.k1, v.k2, v.k3, v.k4] : [v.k1, v.k2, v.p1, v.p2, v.k3],
           );
         }));
   }

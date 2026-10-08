@@ -47,8 +47,11 @@ struct BevSlotConfig {
     // video turns out to be, same idea as hb2i_w/hb2i_h). k1/k2/k3 (radial) and p1/p2 (tangential) follow the
     // standard OpenCV distortion-model convention, matching
     // scripts/calibrate_intrinsics.py's own dist-coefficient ordering.
+    // A fisheye lens file ("model = fisheye") uses OpenCV's cv::fisheye
+    // model instead: k1..k4 on the ray angle, p1/p2 unused.
     double fx = 0.0, fy = 0.0, cx = 0.0, cy = 0.0;
-    double k1 = 0.0, k2 = 0.0, k3 = 0.0, p1 = 0.0, p2 = 0.0;
+    double k1 = 0.0, k2 = 0.0, k3 = 0.0, k4 = 0.0, p1 = 0.0, p2 = 0.0;
+    bool   fisheye = false;
     int    lens_calib_w = 0, lens_calib_h = 0;
     bool   has_distortion = false;
 };
@@ -121,9 +124,9 @@ bool bev_config_load(const std::string &path, BevConfig &out);
 bool bev_config_save(const std::string &path, const BevConfig &cfg);
 
 // Parses a flat key=value lens/intrinsics file (fx, fy, cx, cy, calib_w,
-// calib_h required; k1, k2, k3, p1, p2 optional, default 0.0 -- a
+// calib_h required; k1, k2, k3, k4, p1, p2 optional, default 0.0 -- a
 // --zero-tangent-dist or non-rational-model calibration legitimately has
-// some of these at zero). On success, sets slot's fx/fy/cx/cy/k1../
+// some of these at zero; model = pinhole|fisheye, default pinhole). On success, sets slot's fx/fy/cx/cy/k1../
 // lens_calib_w/h and has_distortion=true; slot is left untouched otherwise.
 // Returns false, with no message printed, if path doesn't exist (the
 // expected/common state before a lens is calibrated -- the caller decides
