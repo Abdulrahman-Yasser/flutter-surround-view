@@ -1,6 +1,7 @@
 #include "still_camera.h"
 
 #include <libcamera/libcamera.h>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include <dlfcn.h>
@@ -12,6 +13,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <algorithm>
 #include <map>
 #include <mutex>
 #include <stdexcept>
@@ -62,6 +64,13 @@ std::shared_ptr<CameraManager> acquire_manager()
     return started;
 }
 
+// What a still can be read as, best first. The Pi's ISP gives YUV420; USB
+// (UVC) cameras usually only offer YUYV, and MJPEG for their large sizes.
+const PixelFormat kStillFormats[] = {
+    formats::YUV420, formats::NV12, formats::NV21, formats::YUYV, formats::UYVY,
+    formats::MJPEG, formats::RGB888, formats::BGR888, formats::XRGB8888,
+};
+
 } // namespace
 
 int still_camera_manager_count() { return g_managers.load(); }
@@ -75,6 +84,7 @@ struct StillCamera::Impl {
     std::map<const FrameBuffer *, std::vector<uint8_t *>> planes;
     std::vector<std::pair<void *, size_t>> maps;
     Stream *stream = nullptr;
+    PixelFormat format;
     unsigned width = 0, height = 0, stride = 0;
     bool acquired = false, started = false;
 
@@ -134,6 +144,37 @@ struct StillCamera::Impl {
     {
         const FrameBuffer *fb = req->buffers().begin()->second;
         const std::vector<uint8_t *> &p = planes.at(fb);
+        const int w = (int)width, h = (int)height;
+        cv::Mat bgr;
+        if (format == formats::MJPEG) {
+            const size_t used = fb->metadata().planes()[0].bytesused;
+            bgr = cv::imdecode(cv::Mat(1, (int)used, CV_8UC1, p[0]), cv::IMREAD_COLOR);
+            if (bgr.empty()) throw std::runtime_error("camera sent a JPEG that doesn't decode");
+            return bgr;
+        }
+        if (format == formats::YUYV || format == formats::UYVY) {
+            cv::cvtColor(cv::Mat(h, w, CV_8UC2, p[0], stride), bgr,
+                         format == formats::YUYV ? cv::COLOR_YUV2BGR_YUYV : cv::COLOR_YUV2BGR_UYVY);
+            return bgr;
+        }
+        // DRM byte order: RGB888 is stored B, G, R and BGR888 R, G, B.
+        if (format == formats::RGB888) return cv::Mat(h, w, CV_8UC3, p[0], stride).clone();
+        if (format == formats::BGR888) {
+            cv::cvtColor(cv::Mat(h, w, CV_8UC3, p[0], stride), bgr, cv::COLOR_RGB2BGR);
+            return bgr;
+        }
+        if (format == formats::XRGB8888) {
+            cv::cvtColor(cv::Mat(h, w, CV_8UC4, p[0], stride), bgr, cv::COLOR_BGRA2BGR);
+            return bgr;
+        }
+        if (format == formats::NV12 || format == formats::NV21) {
+            cv::Mat nv((int)(height * 3 / 2), w, CV_8UC1);
+            const uint8_t *uv = p.size() > 1 ? p[1] : p[0] + stride * height;
+            for (unsigned r = 0; r < height; ++r) std::memcpy(nv.ptr(r), p[0] + r * stride, width);
+            for (unsigned r = 0; r < height / 2; ++r) std::memcpy(nv.ptr(h + r), uv + r * stride, width);
+            cv::cvtColor(nv, bgr, format == formats::NV12 ? cv::COLOR_YUV2BGR_NV12 : cv::COLOR_YUV2BGR_NV21);
+            return bgr;
+        }
         // The Y plane is followed by U then V at half the stride; copy them
         // packed into the I420 layout cvtColor expects.
         const unsigned cw = width / 2, ch = height / 2, cs = stride / 2;
@@ -145,7 +186,6 @@ struct StillCamera::Impl {
         for (unsigned r = 0; r < height; ++r, dst += width) std::memcpy(dst, y + r * stride, width);
         for (unsigned r = 0; r < ch; ++r, dst += cw) std::memcpy(dst, u + r * cs, cw);
         for (unsigned r = 0; r < ch; ++r, dst += cw) std::memcpy(dst, v + r * cs, cw);
-        cv::Mat bgr;
         cv::cvtColor(i420, bgr, cv::COLOR_YUV2BGR_I420);
         return bgr;
     }
@@ -176,14 +216,33 @@ StillCamera::StillCamera(int index) : impl_(std::make_unique<Impl>())
     d.config = d.camera->generateConfiguration({StreamRole::StillCapture});
     if (!d.config) throw std::runtime_error("no still configuration");
     StreamConfiguration &sc = d.config->at(0);
-    if (auto full = d.camera->properties().get(properties::PixelArraySize)) sc.size = *full;
-    sc.pixelFormat = formats::YUV420;
+    const StreamFormats &offered = sc.formats();
+    const auto fmt = std::find_if(std::begin(kStillFormats), std::end(kStillFormats), [&](const PixelFormat &f) {
+        return !offered.sizes(f).empty();
+    });
+    if (fmt == std::end(kStillFormats)) {
+        std::string have;
+        for (const PixelFormat &f : offered.pixelformats()) have += " " + f.toString();
+        throw std::runtime_error("camera offers no format stills can be read from (it has" + have + ")");
+    }
+    sc.pixelFormat = *fmt;
+    // A Pi sensor reports its full pixel array; a USB camera doesn't, so take
+    // the largest size it offers in this format.
+    if (auto full = d.camera->properties().get(properties::PixelArraySize)) {
+        sc.size = *full;
+    } else {
+        const std::vector<Size> sizes = offered.sizes(*fmt);
+        sc.size = *std::max_element(sizes.begin(), sizes.end(), [](const Size &a, const Size &b) {
+            return a.width * a.height < b.width * b.height;
+        });
+    }
     sc.bufferCount = 2;
-    if (d.config->validate() == CameraConfiguration::Invalid || sc.pixelFormat != formats::YUV420)
-        throw std::runtime_error("camera cannot produce YUV420 stills");
+    if (d.config->validate() == CameraConfiguration::Invalid || sc.pixelFormat != *fmt)
+        throw std::runtime_error("camera rejected " + fmt->toString() + " stills");
     if (d.camera->configure(d.config.get())) throw std::runtime_error("camera configure failed");
 
     d.stream = sc.stream();
+    d.format = sc.pixelFormat;
     d.width = sc.size.width;
     d.height = sc.size.height;
     d.stride = sc.stride;
