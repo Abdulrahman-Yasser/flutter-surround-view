@@ -1,3 +1,4 @@
+import 'package:bev_calib/bev_calib.dart';
 import 'package:flutter/material.dart';
 
 import 'models.dart';
@@ -11,7 +12,9 @@ class TopToolbar extends StatelessWidget {
   const TopToolbar({
     super.key,
     required this.mode,
-    required this.onModeChanged,
+    required this.position,
+    required this.mounted,
+    required this.onSurroundTap,
     required this.camSubViews,
     required this.onCameraTap,
     required this.onSideViewsTap,
@@ -26,11 +29,13 @@ class TopToolbar extends StatelessWidget {
   });
 
   final ViewMode mode;
-  final ValueChanged<ViewMode> onModeChanged;
-  final Map<CameraId, CameraSubView> camSubViews;
-  final ValueChanged<CameraId> onCameraTap;
+  final CameraPosition position;
+  final List<CameraPosition> mounted;
+  final VoidCallback onSurroundTap;
+  final Map<CameraPosition, CameraSubView> camSubViews;
+  final ValueChanged<CameraPosition> onCameraTap;
   final VoidCallback onSideViewsTap;
-  final CameraId frontRearCamera;
+  final CameraPosition frontRearCamera;
   final VoidCallback onFrontRearTap;
   final Set<CameraOverlay> overlays;
   final ValueChanged<CameraOverlay> onToggleOverlay;
@@ -39,7 +44,7 @@ class TopToolbar extends StatelessWidget {
   final VoidCallback onSettings;
   final bool backendConnected;
 
-  String _camLabel(String base, CameraId camera, bool selected) {
+  String _camLabel(String base, CameraPosition camera, bool selected) {
     final CameraSubView sub = camSubViews[camera]!;
     if (!selected || sub == CameraSubView.normal) return base;
     return '$base · ${sub.shortLabel}';
@@ -48,6 +53,8 @@ class TopToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool sideViewsSelected = mode == ViewMode.sideViews;
+    final bool hasSides = mounted.contains(CameraPosition.left) && mounted.contains(CameraPosition.right);
+    final bool hasFrontRear = mounted.contains(CameraPosition.front) && mounted.contains(CameraPosition.back);
     return Container(
       height: 46,
       color: _barColor,
@@ -63,68 +70,32 @@ class TopToolbar extends StatelessWidget {
                     icon: Icons.threesixty,
                     label: '360 degree',
                     selected: mode == ViewMode.surround360,
-                    onTap: () => onModeChanged(ViewMode.surround360),
+                    onTap: onSurroundTap,
                   ),
-                  _ToolbarButton(
-                    icon: Icons.arrow_upward,
-                    label: _camLabel(
-                      'Front camera',
-                      CameraId.front,
-                      mode == ViewMode.front,
+                  for (final CameraPosition p in mounted)
+                    _ToolbarButton(
+                      icon: Icons.arrow_upward,
+                      turns: (90 - p.facingDeg) / 360,
+                      label: _camLabel(p.label, p, mode == ViewMode.camera && position == p),
+                      selected: mode == ViewMode.camera && position == p,
+                      onTap: () => onCameraTap(p),
                     ),
-                    selected: mode == ViewMode.front,
-                    onTap: () => onCameraTap(CameraId.front),
-                  ),
-                  _ToolbarButton(
-                    icon: Icons.arrow_downward,
-                    label: _camLabel(
-                      'Back camera',
-                      CameraId.rear,
-                      mode == ViewMode.rear,
+                  if (hasSides)
+                    _ToolbarButton(
+                      icon: Icons.view_column,
+                      label: _camLabel('Side views', CameraPosition.left, sideViewsSelected),
+                      selected: sideViewsSelected,
+                      onTap: onSideViewsTap,
                     ),
-                    selected: mode == ViewMode.rear,
-                    onTap: () => onCameraTap(CameraId.rear),
-                  ),
-                  _ToolbarButton(
-                    icon: Icons.arrow_forward,
-                    label: _camLabel(
-                      'Right camera',
-                      CameraId.right,
-                      mode == ViewMode.right,
+                  if (hasFrontRear)
+                    _ToolbarButton(
+                      icon: mode == ViewMode.frontRear
+                          ? (frontRearCamera == CameraPosition.front ? Icons.arrow_upward : Icons.arrow_downward)
+                          : Icons.swap_vert,
+                      label: 'Rear/Front cameras',
+                      selected: mode == ViewMode.frontRear,
+                      onTap: onFrontRearTap,
                     ),
-                    selected: mode == ViewMode.right,
-                    onTap: () => onCameraTap(CameraId.right),
-                  ),
-                  _ToolbarButton(
-                    icon: Icons.arrow_back,
-                    label: _camLabel(
-                      'Left camera',
-                      CameraId.left,
-                      mode == ViewMode.left,
-                    ),
-                    selected: mode == ViewMode.left,
-                    onTap: () => onCameraTap(CameraId.left),
-                  ),
-                  _ToolbarButton(
-                    icon: Icons.view_column,
-                    label: _camLabel(
-                      'Side views',
-                      CameraId.left,
-                      sideViewsSelected,
-                    ),
-                    selected: sideViewsSelected,
-                    onTap: onSideViewsTap,
-                  ),
-                  _ToolbarButton(
-                    icon: mode == ViewMode.frontRear
-                        ? (frontRearCamera == CameraId.front
-                            ? Icons.arrow_upward
-                            : Icons.arrow_downward)
-                        : Icons.swap_vert,
-                    label: 'Rear/Front cameras',
-                    selected: mode == ViewMode.frontRear,
-                    onTap: onFrontRearTap,
-                  ),
                 ],
               ),
             ),
@@ -157,9 +128,11 @@ class _ToolbarButton extends StatelessWidget {
     required this.label,
     required this.onTap,
     required this.selected,
+    this.turns = 0,
   });
 
   final IconData icon;
+  final double turns;
   final String label;
   final VoidCallback onTap;
   final bool selected;
@@ -180,7 +153,10 @@ class _ToolbarButton extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Icon(icon, size: 14, color: fg),
+                RotationTransition(
+                  turns: AlwaysStoppedAnimation<double>(turns),
+                  child: Icon(icon, size: 14, color: fg),
+                ),
                 const SizedBox(width: 4),
                 Text(
                   label,

@@ -28,6 +28,35 @@ BEV_CALIB_EXPORT int32_t bev_calib_camera_active(void);
 // Cameras libcamera enumerates, or -1.
 BEV_CALIB_EXPORT int32_t bev_calib_cameras_present(void);
 
+// ── Cameras and where they are mounted ───────────────────────────────────────
+
+typedef struct BevCalibCameraEntry {
+    char id[256];               // libcamera's stable id, what bev_config.ini stores
+    char model[64];
+} BevCalibCameraEntry;
+
+// Fills up to cap entries; returns how many cameras there are, or -1.
+BEV_CALIB_EXPORT int32_t bev_calib_camera_list(BevCalibCameraEntry *out, int32_t cap);
+// One frame from that camera as a JPEG scaled to width. Blocks for a moment.
+BEV_CALIB_EXPORT int32_t bev_calib_camera_snapshot(const char *camera_id, const char *jpeg_path,
+                                                   int32_t width);
+
+// Positions are BevPosition indices, 0 .. 7 (bev_config.h).
+BEV_CALIB_EXPORT const char *bev_calib_position_name(int32_t position);
+
+typedef struct BevCalibPosition {
+    char camera[256];           // empty: nothing mounted there
+    char lens[64];
+    int32_t calibrated;         // has a surround homography
+} BevCalibPosition;
+
+BEV_CALIB_EXPORT int32_t bev_calib_config_position(const char *config_path, int32_t position,
+                                                   BevCalibPosition *out);
+// Puts camera_id at position (empty clears it), taking it off any other
+// position, and saves config_path.
+BEV_CALIB_EXPORT int32_t bev_calib_config_assign(const char *config_path, int32_t position,
+                                                 const char *camera_id);
+
 // ── Layout files ─────────────────────────────────────────────────────────────
 
 typedef struct BevCalibLayoutInfo {
@@ -37,7 +66,7 @@ typedef struct BevCalibLayoutInfo {
 } BevCalibLayoutInfo;
 
 typedef struct BevCalibCameraInfo {
-    int32_t slot;               // bev_config.ini slot, also the libcamera index
+    int32_t position;           // where it is mounted, a BevPosition index
     double facing_deg;
     char lens[64];
 } BevCalibCameraInfo;
@@ -76,9 +105,11 @@ typedef struct BevCalibSeam {
     double median_mm, max_mm;
 } BevCalibSeam;
 
-// Cameras are indexed in layout order. A lens file missing from lens_dir is
-// not an error; bev_calib_has_lens() reports it.
-BEV_CALIB_EXPORT BevCalibSession *bev_calib_open(const char *layout_path, const char *lens_dir);
+// Cameras are indexed in layout order, and capture from the camera
+// config_path assigns to each one's position. A lens file missing from
+// lens_dir is not an error; bev_calib_has_lens() reports it.
+BEV_CALIB_EXPORT BevCalibSession *bev_calib_open(const char *layout_path, const char *lens_dir,
+                                                 const char *config_path);
 BEV_CALIB_EXPORT void bev_calib_close(BevCalibSession *s);
 BEV_CALIB_EXPORT int32_t bev_calib_has_lens(BevCalibSession *s, int32_t cam);
 // Uses "<lens_dir>/<lens>-lens.ini" for cam instead of the layout's lens, and
@@ -86,7 +117,7 @@ BEV_CALIB_EXPORT int32_t bev_calib_has_lens(BevCalibSession *s, int32_t cam);
 BEV_CALIB_EXPORT int32_t bev_calib_set_lens(BevCalibSession *s, int32_t cam, const char *lens_dir,
                                             const char *lens);
 
-// Full-resolution still from the camera's slot, after settle_frames frames
+// Full-resolution still from the camera at that position, after settle_frames frames
 // of auto exposure. Blocks for a few seconds.
 BEV_CALIB_EXPORT int32_t bev_calib_capture(BevCalibSession *s, int32_t cam, int32_t settle_frames);
 BEV_CALIB_EXPORT int32_t bev_calib_load_image(BevCalibSession *s, int32_t cam, const char *path);
@@ -127,9 +158,9 @@ typedef struct BevIntrResult {
     double k4;                  // fisheye only, which has no p1/p2
 } BevIntrResult;
 
-// Streams camera_index at full resolution until closed. fisheye selects
+// Streams that camera at full resolution until closed. fisheye selects
 // cv::fisheye's model over the pinhole one.
-BEV_CALIB_EXPORT BevCalibIntrinsics *bev_intr_open(int32_t camera_index, const char *dict,
+BEV_CALIB_EXPORT BevCalibIntrinsics *bev_intr_open(const char *camera_id, const char *dict,
                                                    int32_t squares_x, int32_t squares_y,
                                                    double square_len, double marker_len, int32_t legacy,
                                                    int32_t fisheye);

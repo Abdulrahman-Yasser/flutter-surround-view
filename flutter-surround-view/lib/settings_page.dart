@@ -7,11 +7,13 @@ class SettingsPage extends StatelessWidget {
     required this.paths,
     required this.onSurroundCalibration,
     required this.onLensCalibration,
+    required this.onCameras,
   });
 
   final CalibPaths paths;
   final VoidCallback onSurroundCalibration;
   final VoidCallback onLensCalibration;
+  final VoidCallback onCameras;
 
   @override
   Widget build(BuildContext context) {
@@ -22,6 +24,23 @@ class SettingsPage extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: <Widget>[
+            const Text(
+              'Cameras',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.videocam),
+                title: const Text('Camera positions'),
+                subtitle: const Text(
+                  'Which camera is mounted where on the car: front, back, sides and corners',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: onCameras,
+              ),
+            ),
+            const SizedBox(height: 16),
             const Text(
               'Camera calibration',
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),

@@ -1,12 +1,10 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../calibration.dart';
-import '../ffi/bev_calib_ffi.dart';
 import '../paths.dart';
 
 const _panel = Color(0xFF1B1B21);
@@ -29,8 +27,10 @@ class LensCalibrationPage extends StatefulWidget {
 class _LensCalibrationPageState extends State<LensCalibrationPage> {
   static const _recommendedViews = 15;
 
-  int? _cameras;
-  int _camera = 0;
+  List<CameraInfo>? _cameras;
+  String? _cameraError;
+  String? _camera;
+  Map<CameraPosition, PositionState> _mounted = const {};
   final _lens = TextEditingController(text: 'imx219');
   bool _fisheye = false;
   late final _squares = TextEditingController(text: '${widget.board.squaresX}x${widget.board.squaresY}');
@@ -52,8 +52,15 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
   @override
   void initState() {
     super.initState();
-    Isolate.run(bev_calib_cameras_present).then((n) {
-      if (mounted) setState(() => _cameras = n);
+    _mounted = PositionState.read(widget.paths.configPath);
+    CameraInfo.list().then((cams) {
+      if (!mounted) return;
+      setState(() {
+        _cameras = cams;
+        _camera = cams.isEmpty ? null : cams.first.id;
+      });
+    }, onError: (Object e) {
+      if (mounted) setState(() => _cameraError = '$e');
     });
   }
 
@@ -70,6 +77,14 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  String _cameraName(String id) {
+    final model = _cameras?.firstWhere((c) => c.id == id, orElse: () => CameraInfo(id, id)).model ?? id;
+    for (final e in _mounted.entries) {
+      if (e.value.camera == id) return '$model · ${e.key.label}';
+    }
+    return model;
   }
 
   BoardSpec? _boardFromFields() {
@@ -100,13 +115,13 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
       return;
     }
     setState(() {
-      _busy = 'Opening camera $_camera';
+      _busy = 'Opening ${_cameraName(_camera!)}';
       _error = null;
       _result = null;
     });
     try {
       await Directory(widget.paths.workDir).create(recursive: true);
-      _session = await IntrinsicsSession.open(_camera, board, fisheye: _fisheye);
+      _session = await IntrinsicsSession.open(_camera!, board, fisheye: _fisheye);
       _running = true;
       _loop = _grabLoop();
     } on CalibrationException catch (e) {
@@ -232,16 +247,19 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
       padding: const EdgeInsets.all(12),
       child: ListView(children: [
         if (!live) ...[
-          DropdownButtonFormField<int>(
+          DropdownButtonFormField<String>(
             initialValue: _camera,
+            isExpanded: true,
             decoration: const InputDecoration(labelText: 'Camera', isDense: true, border: OutlineInputBorder()),
             items: [
-              for (var i = 0; i < ((_cameras ?? 0) > 0 ? _cameras! : 1); i++)
-                DropdownMenuItem(value: i, child: Text('Camera $i')),
+              for (final c in _cameras ?? const <CameraInfo>[])
+                DropdownMenuItem(value: c.id, child: Text(_cameraName(c.id), overflow: TextOverflow.ellipsis)),
             ],
-            onChanged: (v) => setState(() => _camera = v ?? 0),
+            onChanged: (v) => setState(() => _camera = v),
           ),
-          if (_cameras == 0) const Text('No camera found', style: TextStyle(color: _bad, fontSize: 12)),
+          if (_cameras != null && _cameras!.isEmpty)
+            const Text('No camera found', style: TextStyle(color: _bad, fontSize: 12)),
+          if (_cameraError != null) Text(_cameraError!, style: const TextStyle(color: _bad, fontSize: 12)),
           const SizedBox(height: 6),
           _field('Lens name (file <name>-lens.ini)', _lens),
           Padding(
@@ -262,13 +280,14 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
             Expanded(child: _field('Marker mm', _marker)),
           ]),
           _field('ArUco dictionary', _dict),
-          FilledButton.icon(onPressed: _start, icon: const Icon(Icons.play_arrow), label: const Text('Start')),
+          FilledButton.icon(
+              onPressed: _camera == null ? null : _start, icon: const Icon(Icons.play_arrow), label: const Text('Start')),
           if (_error != null) Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(_error!, style: const TextStyle(color: _bad, fontSize: 12)),
           ),
         ] else ...[
-          Text('Camera $_camera · ${_lens.text.trim()} · ${_fisheye ? 'fisheye' : 'pinhole'}',
+          Text('${_cameraName(_camera!)} · ${_lens.text.trim()} · ${_fisheye ? 'fisheye' : 'pinhole'}',
               style: const TextStyle(fontWeight: FontWeight.w700)),
           if (st != null) ...[
             Text('${st.width}x${st.height}', style: small),

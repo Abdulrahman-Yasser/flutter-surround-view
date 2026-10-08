@@ -33,20 +33,104 @@ void _check(int result) {
   if (result <= 0) throw CalibrationException(_lastError());
 }
 
-class LayoutCamera {
-  const LayoutCamera({required this.slot, required this.facingDeg, required this.lens});
+/// Where a camera is mounted on the car. The order is the native one
+/// (BevPosition in bev_config.h), so [index] is what crosses the FFI.
+enum CameraPosition {
+  frontLeft('front_left', 'Front-left', 'FL', 135, -0.6, 1),
+  frontRight('front_right', 'Front-right', 'FR', 45, 0.6, 1),
+  backLeft('back_left', 'Back-left', 'BL', 225, -0.6, -1),
+  backRight('back_right', 'Back-right', 'BR', 315, 0.6, -1),
+  front('front', 'Front', 'F', 90, 0, 1),
+  right('right', 'Right', 'R', 0, 1, 0),
+  back('back', 'Back', 'B', 270, 0, -1),
+  left('left', 'Left', 'L', 180, -1, 0);
 
-  final int slot;
+  const CameraPosition(this.key, this.label, this.short, this.facingDeg, this.mountX, this.mountY);
+
+  /// The name bev_config.ini and the layout files use.
+  final String key;
+  final String label;
+  final String short;
+  final double facingDeg;
+
+  /// Where on the car outline it sits, in half-widths (x, right) and
+  /// half-lengths (y, forward) from the centre.
+  final double mountX, mountY;
+
+  /// Clockwise from the front, for lists and toolbars.
+  static const compass = [front, frontRight, right, backRight, back, backLeft, left, frontLeft];
+}
+
+class LayoutCamera {
+  const LayoutCamera({required this.position, required this.facingDeg, required this.lens});
+
+  final CameraPosition position;
   final double facingDeg;
   final String lens;
+}
 
-  String get facingLabel => switch (((facingDeg % 360) + 360) % 360) {
-        90 => 'front',
-        270 => 'back',
-        180 => 'left',
-        0 => 'right',
-        final d => '${d.toStringAsFixed(0)}°',
-      };
+/// A camera libcamera can see right now.
+class CameraInfo {
+  const CameraInfo(this.id, this.model);
+
+  /// Stable across boots and plug order: what bev_config.ini stores.
+  final String id;
+  final String model;
+
+  /// Lists the cameras. Starts a camera manager, so no live view may be up.
+  static Future<List<CameraInfo>> list() {
+    return Isolate.run(() => using((arena) {
+          const cap = 16;
+          final out = arena<BevCalibCameraEntry>(cap);
+          final n = bev_calib_camera_list(out, cap);
+          if (n < 0) throw CalibrationException(_lastError());
+          return [
+            for (var i = 0; i < math.min(n, cap); i++)
+              CameraInfo(charArrayToString(out[i].id, 256), charArrayToString(out[i].model, 64)),
+          ];
+        }));
+  }
+
+  /// Saves a JPEG of one frame, [width] pixels wide.
+  static Future<void> snapshot(String id, String jpegPath, {int width = 480}) {
+    return Isolate.run(() => _withString(
+        id, (i) => _withString(jpegPath, (p) => _check(bev_calib_camera_snapshot(i, p, width)))));
+  }
+}
+
+/// What bev_config.ini holds for one position.
+class PositionState {
+  const PositionState({required this.camera, required this.lens, required this.calibrated});
+
+  /// libcamera id of the camera mounted there; empty if none.
+  final String camera;
+  final String lens;
+  final bool calibrated;
+
+  bool get assigned => camera.isNotEmpty;
+
+  /// Every position's state. Reads the file only; no camera is touched.
+  static Map<CameraPosition, PositionState> read(String configPath) {
+    return _withString(configPath, (c) => using((arena) {
+          final p = arena<BevCalibPosition>();
+          return {
+            for (final pos in CameraPosition.values)
+              pos: () {
+                _check(bev_calib_config_position(c, pos.index, p));
+                return PositionState(
+                  camera: charArrayToString(p.ref.camera, 256),
+                  lens: charArrayToString(p.ref.lens, 64),
+                  calibrated: p.ref.calibrated != 0,
+                );
+              }(),
+          };
+        }));
+  }
+
+  /// Mounts [cameraId] at [position] (empty clears it), taking it off any
+  /// other position.
+  static void assign(String configPath, CameraPosition position, String cameraId) =>
+      _withString(configPath, (c) => _withString(cameraId, (i) => _check(bev_calib_config_assign(c, position.index, i))));
 }
 
 class LayoutBoard {
@@ -94,7 +178,7 @@ class CalibLayout {
         for (var i = 0; i < info.ref.cameras; i++) {
           _check(bev_calib_layout_camera(p, i, cam));
           cameras.add(LayoutCamera(
-            slot: cam.ref.slot,
+            position: CameraPosition.values[cam.ref.position],
             facingDeg: cam.ref.facingDeg,
             lens: charArrayToString(cam.ref.lens, 64),
           ));
@@ -241,8 +325,9 @@ class CalibrationSession {
     return Pointer<BevCalibSession>.fromAddress(_address);
   }
 
-  static CalibrationSession open(CalibLayout layout, {required String lensDir}) {
-    final h = _withString(layout.path, (lp) => _withString(lensDir, (ld) => bev_calib_open(lp, ld)));
+  static CalibrationSession open(CalibLayout layout, {required String lensDir, required String configPath}) {
+    final h = _withString(layout.path,
+        (lp) => _withString(lensDir, (ld) => _withString(configPath, (cp) => bev_calib_open(lp, ld, cp))));
     if (h == nullptr) throw CalibrationException(_lastError());
     return CalibrationSession._(h.address, layout, lensDir);
   }
@@ -430,13 +515,13 @@ class IntrinsicsSession {
 
   Pointer<BevCalibIntrinsics> get _h => Pointer<BevCalibIntrinsics>.fromAddress(_address);
 
-  static Future<IntrinsicsSession> open(int camera, BoardSpec board, {bool fisheye = false}) async {
-    final address = await Isolate.run(() => _withString(board.dict, (d) {
-          final h = bev_intr_open(camera, d, board.squaresX, board.squaresY, board.squareLen,
+  static Future<IntrinsicsSession> open(String cameraId, BoardSpec board, {bool fisheye = false}) async {
+    final address = await Isolate.run(() => _withString(cameraId, (id) => _withString(board.dict, (d) {
+          final h = bev_intr_open(id, d, board.squaresX, board.squaresY, board.squareLen,
               board.markerLen, board.legacy ? 1 : 0, fisheye ? 1 : 0);
           if (h == nullptr) throw CalibrationException(_lastError());
           return h.address;
-        }));
+        })));
     return IntrinsicsSession._(address);
   }
 

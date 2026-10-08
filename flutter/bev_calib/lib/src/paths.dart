@@ -20,7 +20,7 @@ class CalibPaths {
   /// Scratch space for stills and previews.
   final String workDir;
 
-  /// When set, stills are read from `<dir>/cam<slot>.png` (or .jpg) instead of
+  /// When set, stills are read from `<dir>/<position>.png` (or .jpg) instead of
   /// the cameras, so the screens can be exercised without hardware.
   final String? offlineImagesDir;
 
@@ -57,16 +57,21 @@ class CalibPaths {
     for (final asset in manifest.listAssets()) {
       if (!asset.startsWith('packages/bev_calib/layouts/') || !asset.endsWith('.ini')) continue;
       final out = File('$layoutsDir/${asset.split('/').last}');
-      if (out.existsSync()) continue;
+      // Presets from before camera positions number their cameras by slot,
+      // which would now land them on the wrong positions.
+      if (out.existsSync() && !RegExp(r'^\s*slot\s*=', multiLine: true).hasMatch(out.readAsStringSync())) {
+        continue;
+      }
       await out.writeAsString(await rootBundle.loadString(asset));
     }
   }
 
-  String? offlineImage(int slot) {
+  /// `<offline dir>/<position>.png` (or .jpg), e.g. front_left.png.
+  String? offlineImage(String position) {
     final dir = offlineImagesDir;
     if (dir == null) return null;
     for (final ext in ['png', 'jpg', 'jpeg']) {
-      final f = File('$dir/cam$slot.$ext');
+      final f = File('$dir/$position.$ext');
       if (f.existsSync()) return f.path;
     }
     return null;

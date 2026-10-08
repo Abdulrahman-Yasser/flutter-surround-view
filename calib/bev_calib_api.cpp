@@ -18,6 +18,7 @@
 struct BevCalibSession {
     std::mutex mutex;
     std::unique_ptr<CalibSession> session;
+    std::vector<std::string> camera_ids;   // per layout camera, from bev_config.ini
     std::vector<CalibSeam> seams;
 };
 
@@ -71,11 +72,72 @@ int32_t bev_calib_camera_active(void) { return still_camera_manager_count() > 0;
 int32_t bev_calib_cameras_present(void)
 {
     try {
-        return StillCamera::count();
+        return (int32_t)StillCamera::list().size();
     } catch (const std::exception &e) {
         t_error = e.what();
         return -1;
     }
+}
+
+int32_t bev_calib_camera_list(BevCalibCameraEntry *out, int32_t cap)
+{
+    try {
+        const std::vector<StillCamera::Info> cams = StillCamera::list();
+        for (size_t i = 0; i < cams.size() && (int32_t)i < cap; ++i) {
+            copy_str(out[i].id, sizeof(out[i].id), cams[i].id);
+            copy_str(out[i].model, sizeof(out[i].model), cams[i].model);
+        }
+        return (int32_t)cams.size();
+    } catch (const std::exception &e) {
+        t_error = e.what();
+        return -1;
+    }
+}
+
+int32_t bev_calib_camera_snapshot(const char *camera_id, const char *jpeg_path, int32_t width)
+{
+    return guarded([&] {
+        cv::Mat frame;
+        {
+            StillCamera camera(camera_id);
+            for (int i = 0; i < 8; ++i) frame = camera.grab();
+        }
+        const double scale = (double)width / frame.cols;
+        cv::Mat small;
+        cv::resize(frame, small, {}, scale, scale, cv::INTER_AREA);
+        return cv::imwrite(jpeg_path, small) ? 1 : fail(std::string("cannot write ") + jpeg_path);
+    });
+}
+
+const char *bev_calib_position_name(int32_t position)
+{
+    const char *name = bev_position_name(position);
+    return name ? name : "";
+}
+
+int32_t bev_calib_config_position(const char *config_path, int32_t position, BevCalibPosition *out)
+{
+    if (!bev_position_name(position)) return fail("no such position");
+    BevConfig cfg;
+    if (!bev_config_load(config_path, cfg)) return fail(std::string("malformed ") + config_path);
+    const BevSlotConfig &s = cfg.slots[position];
+    copy_str(out->camera, sizeof(out->camera), s.camera);
+    copy_str(out->lens, sizeof(out->lens), s.lens_model);
+    out->calibrated = s.has_hb2i;
+    return 1;
+}
+
+int32_t bev_calib_config_assign(const char *config_path, int32_t position, const char *camera_id)
+{
+    if (!bev_position_name(position)) return fail("no such position");
+    BevConfig cfg;
+    if (!bev_config_load(config_path, cfg)) return fail(std::string("malformed ") + config_path);
+    const std::string id = camera_id ? camera_id : "";
+    if (!id.empty())
+        for (BevSlotConfig &s : cfg.slots)
+            if (s.camera == id) s.camera.clear();
+    cfg.slots[position].camera = id;
+    return bev_config_save(config_path, cfg) ? 1 : fail(std::string("cannot write ") + config_path);
 }
 
 int32_t bev_calib_layout_info(const char *path, BevCalibLayoutInfo *out)
@@ -96,7 +158,7 @@ int32_t bev_calib_layout_camera(const char *path, int32_t index, BevCalibCameraI
     if (!calib_layout_load(path, l)) return fail(std::string("bad layout ") + path);
     if (index < 0 || index >= (int32_t)l.cameras.size()) return fail("no such camera");
     const CalibCamera &c = l.cameras[(size_t)index];
-    out->slot = c.slot;
+    out->position = c.position;
     out->facing_deg = c.facing_deg;
     copy_str(out->lens, sizeof(out->lens), c.lens);
     return 1;
@@ -121,15 +183,21 @@ int32_t bev_calib_layout_board(const char *path, int32_t index, BevCalibBoardInf
     return 1;
 }
 
-BevCalibSession *bev_calib_open(const char *layout_path, const char *lens_dir)
+BevCalibSession *bev_calib_open(const char *layout_path, const char *lens_dir, const char *config_path)
 {
     CalibLayout l;
     if (!calib_layout_load(layout_path, l)) {
         fail(std::string("bad layout ") + layout_path);
         return nullptr;
     }
+    BevConfig cfg;
+    if (!bev_config_load(config_path, cfg)) {
+        fail(std::string("malformed ") + config_path);
+        return nullptr;
+    }
     try {
         auto s = std::make_unique<BevCalibSession>();
+        for (const CalibCamera &c : l.cameras) s->camera_ids.push_back(cfg.slots[c.position].camera);
         s->session = std::make_unique<CalibSession>(l, lens_dir ? lens_dir : ".");
         return s.release();
     } catch (const std::exception &e) {
@@ -162,9 +230,14 @@ int32_t bev_calib_capture(BevCalibSession *s, int32_t cam, int32_t settle_frames
     if (bad_cam(s, cam)) return 0;
     std::lock_guard<std::mutex> lock(s->mutex);
     return guarded([&] {
+        const std::string &id = s->camera_ids[(size_t)cam];
+        if (id.empty())
+            return fail(std::string("no camera is assigned to ") +
+                        bev_position_name(s->session->layout().cameras[(size_t)cam].position) +
+                        "; assign one in Settings, Cameras");
         cv::Mat still;
         {
-            StillCamera camera(s->session->layout().cameras[(size_t)cam].slot);
+            StillCamera camera(id);
             for (int i = 0; i < std::max(1, (int)settle_frames); ++i) still = camera.grab();
         }
         s->session->set_image(cam, still);
@@ -308,7 +381,7 @@ int32_t bev_calib_save_config(BevCalibSession *s, const char *config_path)
     return bev_config_save(config_path, cfg) ? 1 : fail(std::string("cannot write ") + config_path);
 }
 
-BevCalibIntrinsics *bev_intr_open(int32_t camera_index, const char *dict, int32_t squares_x,
+BevCalibIntrinsics *bev_intr_open(const char *camera_id, const char *dict, int32_t squares_x,
                                   int32_t squares_y, double square_len, double marker_len, int32_t legacy,
                                   int32_t fisheye)
 {
@@ -322,7 +395,7 @@ BevCalibIntrinsics *bev_intr_open(int32_t camera_index, const char *dict, int32_
     try {
         auto h = std::make_unique<BevCalibIntrinsics>();
         h->calib = std::make_unique<IntrinsicsCalib>(b, fisheye != 0);
-        h->camera = std::make_unique<StillCamera>(camera_index);
+        h->camera = std::make_unique<StillCamera>(camera_id ? camera_id : "");
         return h.release();
     } catch (const std::exception &e) {
         fail(e.what());

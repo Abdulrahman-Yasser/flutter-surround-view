@@ -29,6 +29,10 @@ struct BevSlotConfig {
     // can be normalized for whatever resolution the cameras stream at.
     int    hb2i_w = 0, hb2i_h = 0;
 
+    // libcamera's id for the camera mounted here (Camera::id(), stable across
+    // boots and plug order); empty = no camera assigned to this position.
+    std::string camera;
+
     // Which lens this slot uses, looked up by naming convention as
     // "<lens_dir>/<lens_model>-lens.ini" (see lens_calib_load() and
     // main.cpp's lens_calib_path()). Empty = no lens configured, the
@@ -56,8 +60,20 @@ struct BevSlotConfig {
     bool   has_distortion = false;
 };
 
+// Where a camera is mounted on the car. BevConfig::slots is indexed by these,
+// and bev_config.ini names its sections after them ([front_left] ...). The
+// first four keep the indices of the old [slot0]..[slot3] sections and the
+// forward_*/backward_* file sources, which still load as those positions.
+enum BevPosition {
+    kFrontLeft, kFrontRight, kBackLeft, kBackRight, kFront, kRight, kBack, kLeft, kPositionCount
+};
+
+const char *bev_position_name(int position);         // "front_left"; nullptr out of range
+int bev_position_index(const std::string &name);     // -1 if unknown
+double bev_position_facing(int position);            // default facing_deg for that position
+
 struct BevConfig {
-    static constexpr int kMaxSlots = 4;
+    static constexpr int kMaxSlots = kPositionCount;
     // Ground-sampling density: canvas width in px / px_per_m = real-world
     // meters spanned by the BEV output. Needs rechecking any time the
     // Hb2i matrices change -- the old 4000, tuned

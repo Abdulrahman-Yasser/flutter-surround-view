@@ -107,35 +107,21 @@ class _LayoutPainter extends CustomPainter {
       _label(canvas, 'id ${b.firstId}', (c[0] + c[2]) / 2, 10);
     }
 
-    // Cameras sharing a facing are spread along that side of the car.
-    final bySide = <int, List<int>>{};
     for (var i = 0; i < layout.cameras.length; i++) {
-      bySide.putIfAbsent(layout.cameras[i].facingDeg.round(), () => []).add(i);
-    }
-    for (final entry in bySide.entries) {
-      final rad = entry.key * math.pi / 180;
+      final cam = layout.cameras[i];
+      final rad = cam.facingDeg * math.pi / 180;
       final dir = Offset(math.cos(rad), math.sin(rad));
-      // Left to right as seen from the cameras.
-      final tangent = Offset(dir.dy, -dir.dx);
-      final t = math.min(hw / (dir.dx.abs() + 1e-9), hl / (dir.dy.abs() + 1e-9));
-      final base = dir * t;
-      final n = entry.value.length;
-      final spread = (dir.dy.abs() > dir.dx.abs() ? hw : hl) * 0.5;
-      for (var k = 0; k < n; k++) {
-        final i = entry.value[k];
-        final along = n == 1 ? 0.0 : -spread + 2 * spread * k / (n - 1);
-        final p = base + tangent * along;
-        final from = px(p.dx, p.dy);
-        final to = px(p.dx + dir.dx * 0.5, p.dy + dir.dy * 0.5);
-        final selected = highlight == null || highlight == i;
-        final paint = Paint()
-          ..color = selected ? _cameraColor : _cameraColor.withValues(alpha: 0.3)
-          ..strokeWidth = 2.5
-          ..strokeCap = StrokeCap.round;
-        canvas.drawLine(from, to, paint);
-        canvas.drawCircle(from, 5, paint);
-        _label(canvas, '${layout.cameras[i].slot}', from, 11, color: Colors.white);
-      }
+      final p = Offset(cam.position.mountX * hw, cam.position.mountY * hl);
+      final from = px(p.dx, p.dy);
+      final to = px(p.dx + dir.dx * 0.5, p.dy + dir.dy * 0.5);
+      final selected = highlight == null || highlight == i;
+      final paint = Paint()
+        ..color = selected ? _cameraColor : _cameraColor.withValues(alpha: 0.3)
+        ..strokeWidth = 2.5
+        ..strokeCap = StrokeCap.round;
+      canvas.drawLine(from, to, paint);
+      canvas.drawCircle(from, 5, paint);
+      _label(canvas, cam.position.short, from, 11, color: Colors.white);
     }
   }
 

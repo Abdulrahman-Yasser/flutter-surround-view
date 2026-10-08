@@ -52,9 +52,30 @@ BevConfig bev_config_defaults()
     };
     legacy_hb2i_to_car(cfg.slots[0]);
     legacy_hb2i_to_car(cfg.slots[1]);
-    cfg.slots[2] = BevSlotConfig{ 0.0, -1.0, 1.2, -30.0, 180.0, 270.0, false, mat3{} };
-    cfg.slots[3] = BevSlotConfig{ -0.5, 0.0, 1.2, -30.0,  90.0, 180.0, false, mat3{} };
+    for (int i = 2; i < BevConfig::kMaxSlots; ++i) cfg.slots[i].facing_deg = bev_position_facing(i);
     return cfg;
+}
+
+static const char *const kPositionNames[kPositionCount] = {
+    "front_left", "front_right", "back_left", "back_right", "front", "right", "back", "left",
+};
+static const double kPositionFacing[kPositionCount] = {135, 45, 225, 315, 90, 0, 270, 180};
+
+const char *bev_position_name(int position)
+{
+    return position >= 0 && position < kPositionCount ? kPositionNames[position] : nullptr;
+}
+
+int bev_position_index(const std::string &name)
+{
+    for (int i = 0; i < kPositionCount; ++i)
+        if (name == kPositionNames[i]) return i;
+    return -1;
+}
+
+double bev_position_facing(int position)
+{
+    return position >= 0 && position < kPositionCount ? kPositionFacing[position] : 90.0;
 }
 
 bool parse_facing(const std::string &val, double &out)
@@ -65,6 +86,10 @@ bool parse_facing(const std::string &val, double &out)
     else if (low == "right") { out = 0.0;   return true; }
     else if (low == "back")  { out = 270.0; return true; }
     else if (low == "left")  { out = 180.0; return true; }
+    if (int p = bev_position_index(low); p >= 0) {
+        out = bev_position_facing(p);
+        return true;
+    }
     try {
         size_t consumed = 0;
         out = std::stod(val, &consumed);
@@ -82,11 +107,14 @@ static std::string trim(const std::string &s)
     return s.substr(a, b - a + 1);
 }
 
-// Parses a "[slotN]" section header; returns false if malformed.
+// Parses a "[front_left]"-style section header, or the older "[slotN]";
+// returns false if malformed.
 static bool parse_slot_header(const std::string &line, int &idx)
 {
     if (line.size() < 3 || line.front() != '[' || line.back() != ']') return false;
     std::string inner = line.substr(1, line.size() - 2);
+    idx = bev_position_index(inner);
+    if (idx >= 0) return true;
     if (inner.rfind("slot", 0) != 0) return false;
     std::string num = inner.substr(4);
     if (num.empty()) return false;
@@ -172,6 +200,7 @@ bool bev_config_load(const std::string &path, BevConfig &out)
                     }
                 }
                 else if (key == "lens_model") s.lens_model = val;
+                else if (key == "camera")     s.camera = val;
                 else if (key == "hb2i") {
                     std::istringstream iss(val);
                     double v[9];
@@ -224,7 +253,9 @@ bool bev_config_save(const std::string &path, const BevConfig &cfg)
 
     for (int i = 0; i < BevConfig::kMaxSlots; ++i) {
         const BevSlotConfig &s = cfg.slots[i];
-        out << "\n[slot" << i << "]\n";
+        if (s.camera.empty() && !s.has_hb2i && s.lens_model.empty()) continue;
+        out << "\n[" << bev_position_name(i) << "]\n";
+        if (!s.camera.empty()) out << "camera = " << s.camera << "\n";
         out << "cam_x = " << s.cam_x << "\n";
         out << "cam_y = " << s.cam_y << "\n";
         out << "cam_h = " << s.cam_h << "\n";

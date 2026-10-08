@@ -6,6 +6,7 @@
 //   bev-calib --intrinsics <layout.ini> <photo...> [--lens-out file] [--fisheye]
 //             (lens calibration against the layout's first board)
 
+#include "bev_config.h"
 #include "calib_session.h"
 #include "intrinsics.h"
 
@@ -110,7 +111,7 @@ int main(int argc, char **argv)
             int n = s.detect(c);
             bool ok = s.solve(c);
             const CalibSolve &r = s.result(c);
-            std::printf("camera %d (slot %d, %s, %dx%d): %d corners", c, layout.cameras[c].slot,
+            std::printf("camera %d (%s, %s, %dx%d): %d corners", c, bev_position_name(layout.cameras[c].position),
                         pos[c + 1].c_str(), img.cols, img.rows, n);
             if (!ok) {
                 std::printf(" -- solve failed\n");

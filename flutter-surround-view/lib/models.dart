@@ -1,51 +1,8 @@
 enum ViewMode {
   surround360,
-  front,
-  rear,
-  left,
-  right,
+  camera,
   sideViews,
   frontRear;
-
-  String get label => switch (this) {
-        ViewMode.surround360 => '360°',
-        ViewMode.front => 'Front',
-        ViewMode.rear => 'Rear',
-        ViewMode.left => 'Left',
-        ViewMode.right => 'Right',
-        ViewMode.sideViews => 'Side views',
-        ViewMode.frontRear => 'Front/Rear',
-      };
-
-  CameraId? get asCamera => switch (this) {
-        ViewMode.front => CameraId.front,
-        ViewMode.rear => CameraId.rear,
-        ViewMode.left => CameraId.left,
-        ViewMode.right => CameraId.right,
-        _ => null,
-      };
-}
-
-enum CameraId {
-  front,
-  rear,
-  left,
-  right;
-
-  String get label => switch (this) {
-        CameraId.front => 'Front',
-        CameraId.rear => 'Rear',
-        CameraId.left => 'Left',
-        CameraId.right => 'Right',
-      };
-
-  String get asset => 'assets/$name.png';
-
-  int? get cameraIndex => switch (this) {
-        CameraId.front => 0,
-        CameraId.right => 1,
-        _ => null,
-      };
 }
 
 enum CameraSubView {

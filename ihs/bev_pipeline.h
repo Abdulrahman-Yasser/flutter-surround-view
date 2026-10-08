@@ -82,7 +82,7 @@ private:
     bool render_file();
     bool render_surround();
     bool render_surround_live();
-    bool open_live_slot(Slot &slot, int index);
+    bool open_live_slot(Slot &slot, std::shared_ptr<libcamera::Camera> camera);
     bool start_live_cameras();
     void stop_live_cameras();
     void release_live_slots();

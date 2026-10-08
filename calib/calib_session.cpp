@@ -628,7 +628,7 @@ void CalibSession::apply(BevConfig &cfg) const
         const Cam &c = cams_[i];
         if (!c.solve.ok) continue;
         const CalibCamera &cc = layout_.cameras[i];
-        BevSlotConfig &s = cfg.slots[cc.slot];
+        BevSlotConfig &s = cfg.slots[cc.position];
         for (int col = 0; col < 3; ++col)
             for (int row = 0; row < 3; ++row)
                 s.hb2i.at(row, col) = c.solve.hb2i(row, col);

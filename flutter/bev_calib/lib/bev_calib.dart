@@ -9,6 +9,7 @@ library;
 
 export 'src/calibration.dart';
 export 'src/paths.dart';
+export 'src/ui/cameras_page.dart' show CamerasPage;
 export 'src/ui/layout_diagram.dart' show LayoutDiagram;
 export 'src/ui/lens_calibration_page.dart' show LensCalibrationPage;
 export 'src/ui/pin_editor.dart' show PinEditor;

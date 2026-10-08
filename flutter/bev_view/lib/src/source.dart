@@ -31,6 +31,7 @@ sealed class BevSource {
 final class BevCameraSource extends BevSource {
   const BevCameraSource({
     this.index = 0,
+    this.cameraId,
     this.width,
     this.height,
     this.fps,
@@ -38,6 +39,9 @@ final class BevCameraSource extends BevSource {
   });
 
   final int index;
+
+  /// libcamera's id for the camera (Camera::id()); wins over [index].
+  final String? cameraId;
 
   /// Requested stream size; libcamera may adjust it. Default 1640x1232.
   final int? width;
@@ -57,7 +61,7 @@ final class BevCameraSource extends BevSource {
   @override
   List<MapEntry<String, String>> toParams() => [
     const MapEntry('mode', 'camera'),
-    MapEntry('camera_index', '$index'),
+    if (cameraId != null) MapEntry('camera_id', cameraId!) else MapEntry('camera_index', '$index'),
     if (width != null) MapEntry('width', '$width'),
     if (height != null) MapEntry('height', '$height'),
     if (fps != null) MapEntry('camera_fps', '$fps'),

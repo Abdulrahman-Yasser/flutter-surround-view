@@ -191,24 +191,26 @@ struct StillCamera::Impl {
     }
 };
 
-int StillCamera::count()
+std::vector<StillCamera::Info> StillCamera::list()
 {
-    return (int)acquire_manager()->cameras().size();
+    std::vector<Info> out;
+    for (const std::shared_ptr<Camera> &cam : acquire_manager()->cameras()) {
+        const auto model = cam->properties().get(properties::Model);
+        out.push_back({cam->id(), model ? std::string(*model) : cam->id()});
+    }
+    return out;
 }
 
-StillCamera::StillCamera(int index) : impl_(std::make_unique<Impl>())
+StillCamera::StillCamera(const std::string &id) : impl_(std::make_unique<Impl>())
 {
     Impl &d = *impl_;
     d.cm = acquire_manager();
-    const auto cameras = d.cm->cameras();
-    if (index < 0 || (size_t)index >= cameras.size())
-        throw std::runtime_error("camera " + std::to_string(index) + " requested, " +
-                                 std::to_string(cameras.size()) + " detected");
-    d.camera = cameras[(size_t)index];
+    d.camera = d.cm->get(id);
+    if (!d.camera) throw std::runtime_error("camera " + id + " is not connected");
     // Same wait as the view's acquire_camera(): a released camera can take a
     // moment to come free after its owner was torn down.
     for (int i = 0; d.camera->acquire() != 0; ++i) {
-        if (i == 100) throw std::runtime_error("camera " + std::to_string(index) + " is in use");
+        if (i == 100) throw std::runtime_error("camera " + id + " is in use");
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     d.acquired = true;

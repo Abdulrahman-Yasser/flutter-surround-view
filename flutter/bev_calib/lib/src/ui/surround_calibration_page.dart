@@ -57,6 +57,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
   File? _preview;
   int _previewGen = 0;
   List<SeamResult> _seams = const [];
+  Map<CameraPosition, PositionState> _mounted = const {};
 
   CalibPaths get _paths => widget.paths;
 
@@ -79,7 +80,9 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
       await _paths.installDefaultLayouts();
       await Directory(_paths.workDir).create(recursive: true);
       final all = CalibLayout.loadAll(_paths.layoutsDir);
+      final mounted = PositionState.read(_paths.configPath);
       setState(() {
+        _mounted = mounted;
         _layouts = all;
         _layout ??= all.isEmpty ? null : all.first;
       });
@@ -104,7 +107,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
     if (layout == null) return;
     _session?.close();
     try {
-      _session = CalibrationSession.open(layout, lensDir: _paths.lensDir);
+      _session = CalibrationSession.open(layout, lensDir: _paths.lensDir, configPath: _paths.configPath);
     } on CalibrationException catch (e) {
       _toast('Cannot open ${layout.name}: $e');
       return;
@@ -130,13 +133,13 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
   Future<void> _capture(int i) async {
     final s = _session!;
     final cam = _cams[i];
-    final slot = _layout!.cameras[i].slot;
+    final position = _layout!.cameras[i].position;
     setState(() {
       cam.error = null;
       cam.status = 'Capturing';
     });
     try {
-      final offline = _paths.offlineImage(slot);
+      final offline = _paths.offlineImage(position.key);
       if (offline != null) {
         await _track(s.loadImage(i, offline));
       } else {
@@ -273,7 +276,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
 
   String _camTitle(int i) {
     final c = _layout!.cameras[i];
-    return 'Camera ${i + 1} · slot ${c.slot} · ${c.facingLabel}';
+    return 'Camera ${i + 1} · ${c.position.label}';
   }
 
   @override
@@ -341,21 +344,44 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
           padding: const EdgeInsets.all(12),
           child: Row(children: [
             Expanded(
-              child: Text(
-                'Place the boards as drawn, thick edge = printed top. Keep them still '
-                'until every camera is captured.\nBoard positions: ${_paths.layoutsDir}',
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
-              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text(
+                  'Place the boards as drawn, thick edge = printed top. Keep them still '
+                  'until every camera is captured.',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                if (_layout != null) _positionsLine(_layout!),
+                Text('Board positions: ${_paths.layoutsDir}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 11)),
+              ]),
             ),
             const SizedBox(width: 12),
             FilledButton.icon(
-              onPressed: _layout == null ? null : _start,
+              onPressed: _layout == null || (_paths.offlineImagesDir == null && _unmounted(_layout!).isNotEmpty)
+                  ? null
+                  : _start,
               icon: const Icon(Icons.camera_alt),
               label: const Text('Capture'),
             ),
           ]),
         ),
       ],
+    );
+  }
+
+  List<CameraPosition> _unmounted(CalibLayout l) => [
+        for (final c in l.cameras)
+          if (!(_mounted[c.position]?.assigned ?? false)) c.position,
+      ];
+
+  Widget _positionsLine(CalibLayout l) {
+    final missing = _paths.offlineImagesDir != null ? const <CameraPosition>[] : _unmounted(l);
+    final needs = l.cameras.map((c) => c.position.label).join(', ');
+    return Text(
+      missing.isEmpty
+          ? 'Cameras: $needs'
+          : 'No camera at ${missing.map((p) => p.label).join(', ')}. Assign one in Settings > Cameras.',
+      style: TextStyle(color: missing.isEmpty ? Colors.white70 : _warn, fontSize: 12),
     );
   }
 

@@ -40,19 +40,19 @@ const Set<ViewMode> _fullScreenModes = <ViewMode>{
   ViewMode.frontRear,
 };
 
-ViewMode _viewModeForCamera(CameraId camera) => switch (camera) {
-      CameraId.front => ViewMode.front,
-      CameraId.rear => ViewMode.rear,
-      CameraId.left => ViewMode.left,
-      CameraId.right => ViewMode.right,
-    };
-
 class _SurroundViewScreenState extends State<SurroundViewScreen> {
   ViewMode _mode = ViewMode.surround360;
-  CameraId _frontRearCamera = CameraId.front;
-  final Map<CameraId, CameraSubView> _camSubView = <CameraId, CameraSubView>{
-    for (final CameraId c in CameraId.values) c: CameraSubView.normal,
+  CameraPosition _position = CameraPosition.front;
+  CameraPosition _frontRearCamera = CameraPosition.front;
+  final Map<CameraPosition, CameraSubView> _camSubView = <CameraPosition, CameraSubView>{
+    for (final CameraPosition p in CameraPosition.values) p: CameraSubView.normal,
   };
+  Map<CameraPosition, PositionState> _mounted = readMountedCameras();
+
+  List<CameraPosition> get _mountedPositions => <CameraPosition>[
+        for (final CameraPosition p in CameraPosition.compass)
+          if (_mounted[p]?.assigned ?? false) p,
+      ];
   final Set<CameraOverlay> _overlays = <CameraOverlay>{};
   bool _suspended = false;
 
@@ -82,33 +82,33 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
     });
   }
 
-  void _cameraTap(CameraId camera) => _switchView(() {
-        final ViewMode m = _viewModeForCamera(camera);
-        if (_mode == m) {
+  void _cameraTap(CameraPosition camera) => _switchView(() {
+        if (_mode == ViewMode.camera && _position == camera) {
           _camSubView[camera] = _camSubView[camera]!.next;
         } else {
-          _mode = m;
+          _mode = ViewMode.camera;
+          _position = camera;
           _camSubView[camera] = CameraSubView.normal;
         }
       });
 
   void _sideViewsTap() => _switchView(() {
         if (_mode == ViewMode.sideViews) {
-          final CameraSubView next = _camSubView[CameraId.left]!.next;
-          _camSubView[CameraId.left] = next;
-          _camSubView[CameraId.right] = next;
+          final CameraSubView next = _camSubView[CameraPosition.left]!.next;
+          _camSubView[CameraPosition.left] = next;
+          _camSubView[CameraPosition.right] = next;
         } else {
           _mode = ViewMode.sideViews;
-          _camSubView[CameraId.left] = CameraSubView.normal;
-          _camSubView[CameraId.right] = CameraSubView.normal;
+          _camSubView[CameraPosition.left] = CameraSubView.normal;
+          _camSubView[CameraPosition.right] = CameraSubView.normal;
         }
       });
 
   void _frontRearTap() => _switchView(() {
         if (_mode == ViewMode.frontRear) {
-          _frontRearCamera = _frontRearCamera == CameraId.front
-              ? CameraId.rear
-              : CameraId.front;
+          _frontRearCamera = _frontRearCamera == CameraPosition.front
+              ? CameraPosition.back
+              : CameraPosition.front;
         } else {
           _mode = ViewMode.frontRear;
         }
@@ -122,7 +122,8 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
   // keeps this screen mounted, so first build a frame with no view at all,
   // then open the page; the views come back (with the new calibration) on
   // return.
-  Future<void> _openCalibration(Widget Function(CalibPaths paths) page) async {
+  Future<void> _openCalibration(Widget Function(CalibPaths paths) page,
+      {String savedMessage = 'Calibration saved'}) async {
     if (_suspended) return;
     setState(() => _suspended = true);
     await WidgetsBinding.instance.endOfFrame;
@@ -131,9 +132,24 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
       MaterialPageRoute<bool>(builder: (BuildContext context) => page(calibPaths)),
     );
     if (!mounted) return;
-    setState(() => _suspended = false);
-    if (saved == true) _toast('Calibration saved');
+    setState(() {
+      _suspended = false;
+      _mounted = readMountedCameras();
+      final bool gone = switch (_mode) {
+        ViewMode.camera => !_mountedPositions.contains(_position),
+        ViewMode.sideViews =>
+          !_mountedPositions.contains(CameraPosition.left) || !_mountedPositions.contains(CameraPosition.right),
+        ViewMode.frontRear =>
+          !_mountedPositions.contains(CameraPosition.front) || !_mountedPositions.contains(CameraPosition.back),
+        ViewMode.surround360 => false,
+      };
+      if (gone) _mode = ViewMode.surround360;
+    });
+    if (saved == true) _toast(savedMessage);
   }
+
+  void _openCameras() => _openCalibration((CalibPaths paths) => CamerasPage(paths: paths),
+      savedMessage: 'Camera positions saved');
 
   void _openSurroundCalibration() =>
       _openCalibration((CalibPaths paths) => SurroundCalibrationPage(paths: paths));
@@ -148,27 +164,29 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
           paths: calibPaths,
           onSurroundCalibration: _openSurroundCalibration,
           onLensCalibration: _openLensCalibration,
+          onCameras: _openCameras,
         ),
       ),
     );
   }
 
   String _modeTagLabel() {
-    if (_mode == ViewMode.frontRear) return '${_frontRearCamera.label} view';
-    final CameraId? cam = _mode.asCamera;
-    if (cam != null) {
-      final CameraSubView sub = _camSubView[cam]!;
-      return sub == CameraSubView.normal
-          ? '${_mode.label} view'
-          : '${_mode.label} - ${sub.label}';
+    switch (_mode) {
+      case ViewMode.surround360:
+        return '360° view';
+      case ViewMode.frontRear:
+        return '${_frontRearCamera.label} view';
+      case ViewMode.camera:
+        final CameraSubView sub = _camSubView[_position]!;
+        return sub == CameraSubView.normal
+            ? '${_position.label} view'
+            : '${_position.label} - ${sub.label}';
+      case ViewMode.sideViews:
+        final CameraSubView sub = _camSubView[CameraPosition.left]!;
+        return sub == CameraSubView.normal
+            ? 'Left + Right view'
+            : 'Left + Right - ${sub.label}';
     }
-    if (_mode == ViewMode.sideViews) {
-      final CameraSubView sub = _camSubView[CameraId.left]!;
-      return sub == CameraSubView.normal
-          ? 'Left + Right view'
-          : 'Left + Right - ${sub.label}';
-    }
-    return '${_mode.label} view';
   }
 
   Widget _controlledView() {
@@ -179,6 +197,8 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
               ? const ColoredBox(color: Color(0xFF0A0A0C))
               : CameraViewport(
                   mode: _mode,
+                  position: _position,
+                  mounted: _mounted,
                   overlays: _overlays,
                   camSubViews: _camSubView,
                   frontRearCamera: _frontRearCamera,
@@ -208,11 +228,11 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
                   : Row(
                       children: <Widget>[
                         Expanded(flex: 7, child: _controlledView()),
-                        const Expanded(
+                        Expanded(
                           flex: 3,
                           child: ColoredBox(
-                            color: Color(0xFF0A0A0C),
-                            child: BevPlaceholder(),
+                            color: const Color(0xFF0A0A0C),
+                            child: BevPlaceholder(mounted: _mounted),
                           ),
                         ),
                       ],
@@ -220,7 +240,9 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
             ),
             TopToolbar(
               mode: _mode,
-              onModeChanged: (ViewMode m) => _switchView(() => _mode = m),
+              position: _position,
+              mounted: _mountedPositions,
+              onSurroundTap: () => _switchView(() => _mode = ViewMode.surround360),
               camSubViews: _camSubView,
               onCameraTap: _cameraTap,
               onSideViewsTap: _sideViewsTap,

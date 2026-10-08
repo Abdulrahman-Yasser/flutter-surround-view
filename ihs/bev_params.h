@@ -12,9 +12,11 @@
 //   ring_size   2..6 dma-bufs per view               (default 4)
 //   scanout     1 = take a KMS plane when the shell offers one (EGL DRM only)
 //
-//   camera:   camera_index, width, height, tuning_file
+//   camera:   camera_id (libcamera's id) or camera_index, width, height,
+//             tuning_file
 //   file:     file, bev, cam_h, pitch, yaw, cam_y, px_per_m
-//   surround: src (repeatable) | forward_left, forward_right, backward_left,
+//   surround: src (repeatable: a file, camera:<index> or position:<name>, the
+//             camera bev_config.ini mounts there) | forward_left, forward_right, backward_left,
 //             backward_right; config, lens_dir, blend (feather | pyramid |
 //             coverage), px_per_m, car_icon, car_width, car_length, car_x, car_y
 //   pattern:  width, height, pattern_fps -- a synthetic moving test image, for
@@ -46,6 +48,7 @@ struct BevParams {
 
     // Camera mode (and pattern mode's size).
     int         camera_index = 0;
+    std::string camera_id;            // wins over camera_index when set
     int         width = 0, height = 0; // 0 = the mode's default
     std::string tuning_file;
 

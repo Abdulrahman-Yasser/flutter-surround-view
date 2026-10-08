@@ -27,11 +27,27 @@ final class BevCalibLayoutInfo extends Struct {
 
 final class BevCalibCameraInfo extends Struct {
   @Int32()
-  external int slot;
+  external int position;
   @Double()
   external double facingDeg;
   @Array(64)
   external Array<Char> lens;
+}
+
+final class BevCalibCameraEntry extends Struct {
+  @Array(256)
+  external Array<Char> id;
+  @Array(64)
+  external Array<Char> model;
+}
+
+final class BevCalibPosition extends Struct {
+  @Array(256)
+  external Array<Char> camera;
+  @Array(64)
+  external Array<Char> lens;
+  @Int32()
+  external int calibrated;
 }
 
 final class BevCalibBoardInfo extends Struct {
@@ -173,6 +189,18 @@ external int bev_calib_camera_active();
 @Native<Int32 Function()>()
 external int bev_calib_cameras_present();
 
+@Native<Int32 Function(Pointer<BevCalibCameraEntry>, Int32)>()
+external int bev_calib_camera_list(Pointer<BevCalibCameraEntry> out, int cap);
+
+@Native<Int32 Function(Pointer<Char>, Pointer<Char>, Int32)>()
+external int bev_calib_camera_snapshot(Pointer<Char> cameraId, Pointer<Char> jpegPath, int width);
+
+@Native<Int32 Function(Pointer<Char>, Int32, Pointer<BevCalibPosition>)>()
+external int bev_calib_config_position(Pointer<Char> configPath, int position, Pointer<BevCalibPosition> out);
+
+@Native<Int32 Function(Pointer<Char>, Int32, Pointer<Char>)>()
+external int bev_calib_config_assign(Pointer<Char> configPath, int position, Pointer<Char> cameraId);
+
 @Native<Int32 Function(Pointer<Char>, Pointer<BevCalibLayoutInfo>)>()
 external int bev_calib_layout_info(Pointer<Char> path, Pointer<BevCalibLayoutInfo> out);
 
@@ -182,8 +210,9 @@ external int bev_calib_layout_camera(Pointer<Char> path, int index, Pointer<BevC
 @Native<Int32 Function(Pointer<Char>, Int32, Pointer<BevCalibBoardInfo>)>()
 external int bev_calib_layout_board(Pointer<Char> path, int index, Pointer<BevCalibBoardInfo> out);
 
-@Native<Pointer<BevCalibSession> Function(Pointer<Char>, Pointer<Char>)>()
-external Pointer<BevCalibSession> bev_calib_open(Pointer<Char> layoutPath, Pointer<Char> lensDir);
+@Native<Pointer<BevCalibSession> Function(Pointer<Char>, Pointer<Char>, Pointer<Char>)>()
+external Pointer<BevCalibSession> bev_calib_open(Pointer<Char> layoutPath, Pointer<Char> lensDir,
+    Pointer<Char> configPath);
 
 @Native<Void Function(Pointer<BevCalibSession>)>()
 external void bev_calib_close(Pointer<BevCalibSession> s);
@@ -233,8 +262,8 @@ external int bev_calib_render_preview(Pointer<BevCalibSession> s, double pxPerM,
 @Native<Int32 Function(Pointer<BevCalibSession>, Pointer<Char>)>()
 external int bev_calib_save_config(Pointer<BevCalibSession> s, Pointer<Char> configPath);
 
-@Native<Pointer<BevCalibIntrinsics> Function(Int32, Pointer<Char>, Int32, Int32, Double, Double, Int32, Int32)>()
-external Pointer<BevCalibIntrinsics> bev_intr_open(int cameraIndex, Pointer<Char> dict, int squaresX,
+@Native<Pointer<BevCalibIntrinsics> Function(Pointer<Char>, Pointer<Char>, Int32, Int32, Double, Double, Int32, Int32)>()
+external Pointer<BevCalibIntrinsics> bev_intr_open(Pointer<Char> cameraId, Pointer<Char> dict, int squaresX,
     int squaresY, double squareLen, double markerLen, int legacy, int fisheye);
 
 @Native<Void Function(Pointer<BevCalibIntrinsics>)>()

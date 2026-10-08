@@ -14,8 +14,8 @@
 // (the side marker first_id is on) faces +Y.
 
 struct CalibCamera {
-    int         slot = 0;            // bev_config.ini [slotN] this camera calibrates
-    double      facing_deg = 90.0;
+    int         position = -1;       // BevPosition: which mounted camera this is
+    double      facing_deg = 90.0;   // defaults to the position's own direction
     std::string lens;                // "<lens_dir>/<lens>-lens.ini"; empty = no undistortion
 };
 
@@ -40,5 +40,6 @@ struct CalibLayout {
 };
 
 // Returns false with a message on stderr for a malformed file, an unknown
-// key, overlapping marker id ranges in one dictionary, or a duplicate slot.
+// key, overlapping marker id ranges in one dictionary, or a missing or
+// repeated camera position.
 bool calib_layout_load(const std::string &path, CalibLayout &out);

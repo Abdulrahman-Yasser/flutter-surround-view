@@ -33,10 +33,10 @@ static bool validate(const std::string &path, const CalibLayout &l)
         std::cerr << "[layout] " << path << ": needs at least one [camera] and one [board]\n";
         return false;
     }
-    std::set<int> slots;
+    std::set<int> positions;
     for (const CalibCamera &c : l.cameras) {
-        if (c.slot < 0 || c.slot >= BevConfig::kMaxSlots || !slots.insert(c.slot).second) {
-            std::cerr << "[layout] " << path << ": bad or duplicate camera slot " << c.slot << "\n";
+        if (c.position < 0 || !positions.insert(c.position).second) {
+            std::cerr << "[layout] " << path << ": every [camera] needs its own position\n";
             return false;
         }
     }
@@ -83,6 +83,7 @@ bool calib_layout_load(const std::string &path, CalibLayout &out)
     }
 
     out = CalibLayout{};
+    std::vector<bool> facing_given;
     enum { GLOBAL, CAMERA, BOARD } section = GLOBAL;
     std::string raw;
     int lineno = 0;
@@ -91,7 +92,12 @@ bool calib_layout_load(const std::string &path, CalibLayout &out)
         std::string line = trim(raw.substr(0, raw.find('#')));
         if (line.empty()) continue;
 
-        if (line == "[camera]") { section = CAMERA; out.cameras.emplace_back(); continue; }
+        if (line == "[camera]") {
+            section = CAMERA;
+            out.cameras.emplace_back();
+            facing_given.push_back(false);
+            continue;
+        }
         if (line == "[board]")  { section = BOARD;  out.boards.emplace_back();  continue; }
         if (line.front() == '[') {
             std::cerr << "[layout] " << path << ":" << lineno << ": unknown section '" << line << "'\n";
@@ -116,8 +122,13 @@ bool calib_layout_load(const std::string &path, CalibLayout &out)
                 else ok = false;
             } else if (section == CAMERA) {
                 CalibCamera &c = out.cameras.back();
-                if      (key == "slot")   c.slot = std::stoi(val);
-                else if (key == "facing") ok = parse_facing(val, c.facing_deg);
+                if      (key == "position") ok = (c.position = bev_position_index(val)) >= 0;
+                // The old slot numbers are the first four positions' indices.
+                else if (key == "slot") {
+                    c.position = std::stoi(val);
+                    ok = bev_position_name(c.position) != nullptr;
+                }
+                else if (key == "facing") ok = facing_given.back() = parse_facing(val, c.facing_deg);
                 else if (key == "lens")   c.lens = val;
                 else ok = false;
             } else {
@@ -143,6 +154,8 @@ bool calib_layout_load(const std::string &path, CalibLayout &out)
             return false;
         }
     }
+    for (size_t i = 0; i < out.cameras.size(); ++i)
+        if (!facing_given[i]) out.cameras[i].facing_deg = bev_position_facing(out.cameras[i].position);
     for (CalibBoard &b : out.boards) {
         if (!b.square) continue;
         b.squares_x = b.squares_y = 1;

@@ -208,12 +208,19 @@ bool BevPipeline::init_camera()
     if (!camera_manager_) return false;
 
     const auto cameras = camera_manager_->cameras();
-    if ((size_t)params_.camera_index >= cameras.size()) {
+    if (!params_.camera_id.empty()) {
+        camera_ = camera_manager_->get(params_.camera_id);
+        if (!camera_) {
+            std::fprintf(stderr, "[bev/camera] %s is not connected\n", params_.camera_id.c_str());
+            return false;
+        }
+    } else if ((size_t)params_.camera_index >= cameras.size()) {
         std::fprintf(stderr, "[bev/camera] camera_index %d, but %zu camera(s) detected\n",
                      params_.camera_index, cameras.size());
         return false;
+    } else {
+        camera_ = cameras[(size_t)params_.camera_index];
     }
-    camera_ = cameras[(size_t)params_.camera_index];
     std::printf("[bev/camera] camera: %s\n", camera_->id().c_str());
     if (!acquire_camera(*camera_)) {
         std::fprintf(stderr, "[bev/camera] %s is in use\n", camera_->id().c_str());
@@ -235,6 +242,11 @@ bool BevPipeline::init_camera()
     }
     if (status == CameraConfiguration::Adjusted)
         std::printf("[bev/camera] config adjusted: %s\n", sc.toString().c_str());
+    if (sc.pixelFormat != formats::NV12) {
+        std::fprintf(stderr, "[bev/camera] %s only offers %s; the live view needs NV12\n",
+                     camera_->id().c_str(), sc.pixelFormat.toString().c_str());
+        return false;
+    }
     if (camera_->configure(camera_config_.get())) {
         std::fprintf(stderr, "[bev/camera] configure failed\n");
         return false;
@@ -337,10 +349,15 @@ bool BevPipeline::init_surround()
         return false;
     }
 
+    auto is_live = [](const std::string &s) {
+        return s.rfind("camera:", 0) == 0 || s.rfind("position:", 0) == 0;
+    };
     for (int i = 0; i < n; ++i) {
         const std::string &src = params_.sources[(size_t)i];
         if (src.rfind("camera:", 0) == 0)
             params_.cfg_slots[(size_t)i] = std::atoi(src.c_str() + 7);
+        else if (src.rfind("position:", 0) == 0)
+            params_.cfg_slots[(size_t)i] = bev_position_index(src.substr(9));
     }
 
     BevConfig cfg;
@@ -357,9 +374,8 @@ bool BevPipeline::init_surround()
 
     bool any_live = false, all_live = true;
     for (const std::string &s : params_.sources) {
-        const bool is_live = s.rfind("camera:", 0) == 0;
-        any_live = any_live || is_live;
-        all_live = all_live && is_live;
+        any_live = any_live || is_live(s);
+        all_live = all_live && is_live(s);
     }
     if (any_live && !all_live) {
         std::fprintf(stderr, "[bev/surround] camera sources cannot be mixed with files\n");
@@ -381,7 +397,26 @@ bool BevPipeline::init_surround()
         slot.path     = params_.sources[(size_t)i];
         slot.cfg_slot = params_.cfg_slots[(size_t)i];
         if (live_) {
-            if (!open_live_slot(slot, std::atoi(slot.path.c_str() + 7))) return false;
+            std::shared_ptr<Camera> camera;
+            if (slot.path.rfind("position:", 0) == 0) {
+                const std::string &id = cfg.slots[slot.cfg_slot].camera;
+                camera = id.empty() ? nullptr : camera_manager_->get(id);
+                if (!camera) {
+                    std::fprintf(stderr, "[bev/surround] %s: %s\n", slot.path.c_str(),
+                                 id.empty() ? "no camera assigned in the config" : "camera not connected");
+                    return false;
+                }
+            } else {
+                const auto cameras = camera_manager_->cameras();
+                const int index = std::atoi(slot.path.c_str() + 7);
+                if (index < 0 || (size_t)index >= cameras.size()) {
+                    std::fprintf(stderr, "[bev/surround] camera %d requested, but %zu camera(s) detected\n",
+                                 index, cameras.size());
+                    return false;
+                }
+                camera = cameras[(size_t)index];
+            }
+            if (!open_live_slot(slot, camera)) return false;
             continue;
         }
         slot.src      = std::make_unique<FileSource>();
@@ -485,16 +520,10 @@ bool BevPipeline::render_surround()
     return true;
 }
 
-bool BevPipeline::open_live_slot(Slot &slot, int index)
+bool BevPipeline::open_live_slot(Slot &slot, std::shared_ptr<Camera> camera)
 {
-    const auto cameras = camera_manager_->cameras();
-    if (index < 0 || (size_t)index >= cameras.size()) {
-        std::fprintf(stderr, "[bev/surround] camera %d requested, but %zu camera(s) detected\n",
-                     index, cameras.size());
-        return false;
-    }
-    slot.camera = cameras[(size_t)index];
-    std::printf("[bev/surround] camera %d: %s\n", index, slot.camera->id().c_str());
+    slot.camera = std::move(camera);
+    std::printf("[bev/surround] %s: %s\n", slot.path.c_str(), slot.camera->id().c_str());
     if (!acquire_camera(*slot.camera)) {
         std::fprintf(stderr, "[bev/surround] %s is in use\n", slot.camera->id().c_str());
         return false;
@@ -510,13 +539,18 @@ bool BevPipeline::open_live_slot(Slot &slot, int index)
 
     const auto status = slot.config->validate();
     if (status == CameraConfiguration::Invalid) {
-        std::fprintf(stderr, "[bev/surround] camera %d: no supported format\n", index);
+        std::fprintf(stderr, "[bev/surround] %s: no supported format\n", slot.path.c_str());
         return false;
     }
     if (status == CameraConfiguration::Adjusted)
-        std::printf("[bev/surround] camera %d: config adjusted: %s\n", index, sc.toString().c_str());
+        std::printf("[bev/surround] %s: config adjusted: %s\n", slot.path.c_str(), sc.toString().c_str());
+    if (sc.pixelFormat != formats::NV12) {
+        std::fprintf(stderr, "[bev/surround] %s only offers %s; the live view needs NV12\n",
+                     slot.camera->id().c_str(), sc.pixelFormat.toString().c_str());
+        return false;
+    }
     if (slot.camera->configure(slot.config.get())) {
-        std::fprintf(stderr, "[bev/surround] camera %d: configure failed\n", index);
+        std::fprintf(stderr, "[bev/surround] %s: configure failed\n", slot.path.c_str());
         return false;
     }
 

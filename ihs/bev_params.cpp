@@ -106,6 +106,8 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
                 return bad("an integer in 2..6");
         } else if (key == "scanout") {
             if (!to_bool(val, out.scanout)) return bad("a boolean");
+        } else if (key == "camera_id") {
+            out.camera_id = val;
         } else if (key == "camera_index") {
             if (!to_int(val, out.camera_index) || out.camera_index < 0) return bad("a camera index");
         } else if (key == "width") {
