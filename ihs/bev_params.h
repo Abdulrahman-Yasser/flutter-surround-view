@@ -49,6 +49,11 @@ struct BevParams {
     // Camera mode (and pattern mode's size).
     int         camera_index = 0;
     std::string camera_id;            // wins over camera_index when set
+    // Import packed (YUYV) frames zero-copy too. Off by default: a USB
+    // camera's driver writes them through the CPU cache, which the GPU
+    // doesn't see flushed, so moving parts show rows of the previous frame
+    // (seen on the Pi 5). Off, they are read and converted on the CPU.
+    bool        packed_zero_copy = false;
     int         width = 0, height = 0; // 0 = the mode's default
     std::string tuning_file;
 

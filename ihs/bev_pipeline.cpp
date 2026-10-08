@@ -269,7 +269,7 @@ bool BevPipeline::init_camera()
         // takes it, else converted on the CPU and uploaded, as file mode does.
         renderer_->set_import({(int)sc.size.width, (int)sc.size.height, (int)sc.stride,
                                GpuRenderer::drm_fourcc(sc.pixelFormat)});
-        if (renderer_->init(*egl_, sc, buffer_allocator_->buffers(stream_))) {
+        if (params_.packed_zero_copy && renderer_->init(*egl_, sc, buffer_allocator_->buffers(stream_))) {
             std::printf("[bev/camera] %s imported zero-copy\n", sc.pixelFormat.toString().c_str());
         } else {
             renderer_ = std::make_unique<GpuRenderer>();
@@ -277,7 +277,7 @@ bool BevPipeline::init_camera()
             if (!camera_cpu_->map(buffer_allocator_->buffers(stream_), sc)) return false;
             if (!renderer_->init(*egl_, (int)sc.size.width, (int)sc.size.height, (int)sc.size.width))
                 return false;
-            std::printf("[bev/camera] the GPU won't import %s; converting it to NV12 on the CPU\n",
+            std::printf("[bev/camera] %s is read and converted to NV12 on the CPU\n",
                         sc.pixelFormat.toString().c_str());
         }
     }
@@ -496,7 +496,9 @@ bool BevPipeline::init_surround()
             const StreamConfiguration &sc = slot.config->at(0);
             const GpuRenderer::Import import{slot.width, slot.height, slot.stride,
                                              GpuRenderer::drm_fourcc(sc.pixelFormat)};
-            if (!renderer_->set_live_import(i, import, slot.allocator->buffers(slot.stream)[0].get())) {
+            const bool packed = sc.pixelFormat != formats::NV12;
+            if ((packed && !params_.packed_zero_copy) ||
+                !renderer_->set_live_import(i, import, slot.allocator->buffers(slot.stream)[0].get())) {
                 std::printf("[bev/surround] the GPU won't import %s from %s; frames go through memory\n",
                             sc.pixelFormat.toString().c_str(), slot.path.c_str());
                 cpu_live_ = true;
