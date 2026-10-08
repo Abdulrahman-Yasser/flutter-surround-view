@@ -242,8 +242,8 @@ bool BevPipeline::init_camera()
     }
     if (status == CameraConfiguration::Adjusted)
         std::printf("[bev/camera] config adjusted: %s\n", sc.toString().c_str());
-    if (sc.pixelFormat != formats::NV12) {
-        std::fprintf(stderr, "[bev/camera] %s only offers %s; the live view needs NV12\n",
+    if (!CpuFrames::readable(sc.pixelFormat)) {
+        std::fprintf(stderr, "[bev/camera] %s only offers %s, which the live view can't read\n",
                      camera_->id().c_str(), sc.pixelFormat.toString().c_str());
         return false;
     }
@@ -261,7 +261,25 @@ bool BevPipeline::init_camera()
         requests_.push_back(std::move(req));
     }
 
-    if (!renderer_->init(*egl_, sc, buffer_allocator_->buffers(stream_))) return false;
+    if (sc.pixelFormat == formats::NV12) {
+        if (!renderer_->init(*egl_, sc, buffer_allocator_->buffers(stream_))) return false;
+    } else {
+        // A packed format (a USB camera's YUYV): imported as is when the GPU
+        // takes it, else converted on the CPU and uploaded, as file mode does.
+        renderer_->set_import({(int)sc.size.width, (int)sc.size.height, (int)sc.stride,
+                               GpuRenderer::drm_fourcc(sc.pixelFormat)});
+        if (renderer_->init(*egl_, sc, buffer_allocator_->buffers(stream_))) {
+            std::printf("[bev/camera] %s imported zero-copy\n", sc.pixelFormat.toString().c_str());
+        } else {
+            renderer_ = std::make_unique<GpuRenderer>();
+            camera_cpu_ = std::make_unique<CpuFrames>();
+            if (!camera_cpu_->map(buffer_allocator_->buffers(stream_), sc)) return false;
+            if (!renderer_->init(*egl_, (int)sc.size.width, (int)sc.size.height, (int)sc.size.width))
+                return false;
+            std::printf("[bev/camera] the GPU won't import %s; converting it to NV12 on the CPU\n",
+                        sc.pixelFormat.toString().c_str());
+        }
+    }
 
     {
         std::lock_guard<std::mutex> lock(session_mutex_);
@@ -295,7 +313,8 @@ bool BevPipeline::render_camera()
 {
     auto [buf, req] = session_->nextFrame();
     if (!buf) return false;
-    renderer_->render_frame(buf);
+    if (camera_cpu_) renderer_->render_frame(camera_cpu_->nv12(buf));
+    else             renderer_->render_frame(buf);
     req->reuse(Request::ReuseBuffers);
     camera_->queueRequest(req);
     return true;
@@ -433,19 +452,40 @@ bool BevPipeline::init_surround()
     if (!live_) frames_.resize((size_t)n);
 
     const int canvas_w = slots_[0].width, canvas_h = slots_[0].height;
+    // Live cameras are imported zero-copy, each with its own size and format
+    // (NV12, or a USB camera's YUYV that the GPU converts while sampling). If
+    // the GPU refuses one, every camera goes through memory instead: NV12 as
+    // is, the packed ones converted on the CPU.
+    cpu_live_ = false;
     if (live_) {
-        for (const Slot &slot : slots_) {
-            if (slot.width != canvas_w || slot.height != canvas_h) {
-                std::fprintf(stderr, "[bev/surround] all cameras must use the same size\n");
-                return false;
+        if (!renderer_->init_multi_live(*egl_, canvas_w, canvas_h, slots_[0].stride, n)) return false;
+        for (int i = 0; i < n && !cpu_live_; ++i) {
+            const Slot &slot = slots_[(size_t)i];
+            const StreamConfiguration &sc = slot.config->at(0);
+            const GpuRenderer::Import import{slot.width, slot.height, slot.stride,
+                                             GpuRenderer::drm_fourcc(sc.pixelFormat)};
+            if (!renderer_->set_live_import(i, import, slot.allocator->buffers(slot.stream)[0].get())) {
+                std::printf("[bev/surround] the GPU won't import %s from %s; frames go through memory\n",
+                            sc.pixelFormat.toString().c_str(), slot.path.c_str());
+                cpu_live_ = true;
             }
         }
+        if (cpu_live_) {
+            renderer_ = std::make_unique<GpuRenderer>();
+            for (Slot &slot : slots_) {
+                slot.cpu = std::make_unique<CpuFrames>();
+                if (!slot.cpu->map(slot.allocator->buffers(slot.stream), slot.config->at(0))) return false;
+            }
+            frames_.resize((size_t)n);
+        } else {
+            std::printf("[bev/surround] every camera imported zero-copy\n");
+        }
     }
-    bool ok;
-    if (live_)        ok = renderer_->init_multi_live(*egl_, canvas_w, canvas_h, slots_[0].stride, n);
-    else if (pyramid_) ok = renderer_->init_multi_pyramid(*egl_, canvas_w, canvas_h, slots_[0].stride, n);
-    else              ok = renderer_->init_multi(*egl_, canvas_w, canvas_h, slots_[0].stride, n);
-    if (!ok) return false;
+    if (!live_ || cpu_live_) {
+        const bool ok = pyramid_ ? renderer_->init_multi_pyramid(*egl_, canvas_w, canvas_h, slots_[0].stride, n)
+                                 : renderer_->init_multi(*egl_, canvas_w, canvas_h, slots_[0].stride, n);
+        if (!ok) return false;
+    }
 
     if (!params_.car_icon.empty()) {
         const double w = params_.car_width_set  ? params_.car_width  : cfg.car_width;
@@ -544,8 +584,8 @@ bool BevPipeline::open_live_slot(Slot &slot, std::shared_ptr<Camera> camera)
     }
     if (status == CameraConfiguration::Adjusted)
         std::printf("[bev/surround] %s: config adjusted: %s\n", slot.path.c_str(), sc.toString().c_str());
-    if (sc.pixelFormat != formats::NV12) {
-        std::fprintf(stderr, "[bev/surround] %s only offers %s; the live view needs NV12\n",
+    if (!CpuFrames::readable(sc.pixelFormat)) {
+        std::fprintf(stderr, "[bev/surround] %s only offers %s, which the live view can't read\n",
                      slot.camera->id().c_str(), sc.pixelFormat.toString().c_str());
         return false;
     }
@@ -604,7 +644,12 @@ bool BevPipeline::render_surround_live()
         live_bufs_.push_back(buf);
         live_reqs_.push_back(req);
     }
-    renderer_->render_frame_multi_live(live_bufs_);
+    if (cpu_live_) {
+        for (size_t i = 0; i < slots_.size(); ++i) frames_[i] = slots_[i].cpu->nv12(live_bufs_[i]);
+        renderer_->render_frame_multi(frames_);
+    } else {
+        renderer_->render_frame_multi_live(live_bufs_);
+    }
     for (size_t i = 0; i < slots_.size(); ++i) {
         live_reqs_[i]->reuse(Request::ReuseBuffers);
         slots_[i].camera->queueRequest(live_reqs_[i]);

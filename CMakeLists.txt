@@ -313,6 +313,7 @@ if (ENABLE_IHS_PV)
         ihs/bev_ihs_pv.cpp
         ihs/bev_params.cpp
         ihs/bev_pipeline.cpp
+        ihs/cpu_frames.cpp
         ihs/dmabuf_ring.cpp
     )
     target_include_directories(bev_view PRIVATE ihs)

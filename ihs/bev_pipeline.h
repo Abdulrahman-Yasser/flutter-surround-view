@@ -12,6 +12,7 @@
 #include "bev_params.h"
 #include "capture_session.h"
 #include "egl_context.h"
+#include "cpu_frames.h"
 #include "file_source.h"
 #include "gpu_renderer.h"
 
@@ -69,6 +70,7 @@ private:
         std::vector<std::unique_ptr<libcamera::Request>> requests;
         libcamera::Stream                               *stream = nullptr;
         std::unique_ptr<CaptureSession>                  session;
+        std::unique_ptr<CpuFrames>                       cpu; // set when frames go through the CPU
         bool                                             acquired = false;
         bool                                             started  = false;
     };
@@ -110,6 +112,8 @@ private:
     bool                                                camera_started_  = false;
     std::mutex                                          session_mutex_;
     std::unique_ptr<CaptureSession>                     session_;
+    // Set for a camera the GPU can't import (a USB camera's YUYV).
+    std::unique_ptr<CpuFrames>                          camera_cpu_;
 
     // File mode.
     std::unique_ptr<FileSource> file_src_;
@@ -118,6 +122,7 @@ private:
     // Surround mode.
     std::vector<Slot>        slots_;
     std::vector<DmaBufFrame> frames_;
+    bool                     cpu_live_ = false;
     bool                     pyramid_ = false;
     bool                     live_    = false;
 

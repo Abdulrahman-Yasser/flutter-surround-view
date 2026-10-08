@@ -969,6 +969,64 @@ bool GpuRenderer::load_ext_fns()
     return true;
 }
 
+uint32_t GpuRenderer::drm_fourcc(const PixelFormat &format)
+{
+    if (format == formats::NV12) return DRM_FORMAT_NV12;
+    if (format == formats::YUYV) return DRM_FORMAT_YUYV;
+    if (format == formats::UYVY) return DRM_FORMAT_UYVY;
+    return 0;
+}
+
+EGLImageKHR GpuRenderer::create_egl_image(const FrameBuffer *buf, const Import &import)
+{
+    if (import.fourcc == 0 || import.fourcc == DRM_FORMAT_NV12) {
+        if (import.w == 0) return create_egl_image(buf);
+        const auto &planes = buf->planes();
+        const EGLint attrs[] = {
+            EGL_WIDTH,                      import.w,
+            EGL_HEIGHT,                     import.h,
+            EGL_LINUX_DRM_FOURCC_EXT,       DRM_FORMAT_NV12,
+            EGL_DMA_BUF_PLANE0_FD_EXT,      planes[0].fd.get(),
+            EGL_DMA_BUF_PLANE0_OFFSET_EXT,  (EGLint)planes[0].offset,
+            EGL_DMA_BUF_PLANE0_PITCH_EXT,   import.stride,
+            EGL_DMA_BUF_PLANE1_FD_EXT,      planes[1].fd.get(),
+            EGL_DMA_BUF_PLANE1_OFFSET_EXT,  (EGLint)planes[1].offset,
+            EGL_DMA_BUF_PLANE1_PITCH_EXT,   import.stride,
+            EGL_NONE,
+        };
+        return pfn_CreateImage(egl_->dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attrs);
+    }
+    // Packed 4:2:2, one plane; sampled through samplerExternalOES like NV12.
+    const auto &planes = buf->planes();
+    const EGLint attrs[] = {
+        EGL_WIDTH,                      import.w,
+        EGL_HEIGHT,                     import.h,
+        EGL_LINUX_DRM_FOURCC_EXT,       (EGLint)import.fourcc,
+        EGL_DMA_BUF_PLANE0_FD_EXT,      planes[0].fd.get(),
+        EGL_DMA_BUF_PLANE0_OFFSET_EXT,  (EGLint)planes[0].offset,
+        EGL_DMA_BUF_PLANE0_PITCH_EXT,   import.stride,
+        EGL_NONE,
+    };
+    return pfn_CreateImage(egl_->dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attrs);
+}
+
+bool GpuRenderer::set_live_import(int slot, const Import &import, const FrameBuffer *buf)
+{
+    if (slot < 0 || slot >= num_cameras_multi_) return false;
+    if ((int)live_imports_.size() < num_cameras_multi_) live_imports_.resize(num_cameras_multi_);
+    live_imports_[slot] = import;
+    const int fd = buf->planes()[0].fd.get();
+    if (fd_cache_.count(fd)) return true;
+    EGLImageKHR img = create_egl_image(buf, import);
+    if (img == EGL_NO_IMAGE_KHR) {
+        std::cerr << "[gpu] slot " << slot << ": dma-buf import refused (0x" << std::hex << eglGetError()
+                  << std::dec << ")\n";
+        return false;
+    }
+    cache_frame(fd, img);
+    return true;
+}
+
 EGLImageKHR GpuRenderer::create_egl_image(const FrameBuffer *buf)
 {
     const auto &planes = buf->planes();
@@ -1183,7 +1241,7 @@ bool GpuRenderer::init(const EGLState &egl,
     for (const auto &buf : buffers) {
         int fd = buf->planes()[0].fd.get();
 
-        EGLImageKHR img = create_egl_image(buf.get());
+        EGLImageKHR img = create_egl_image(buf.get(), import_);
         if (img == EGL_NO_IMAGE_KHR) {
             std::cerr << "[gpu] eglCreateImageKHR failed for fd=" << fd
                       << " (0x" << std::hex << eglGetError() << std::dec << ")\n";
@@ -1633,7 +1691,8 @@ void GpuRenderer::render_frame_multi_live(const std::vector<const libcamera::Fra
         int fd = bufs[i]->planes()[0].fd.get();
         auto it = fd_cache_.find(fd);
         if (it == fd_cache_.end()) {
-            EGLImageKHR img = create_egl_image(bufs[i]);
+            EGLImageKHR img = i < (int)live_imports_.size() ? create_egl_image(bufs[i], live_imports_[i])
+                                                            : create_egl_image(bufs[i]);
             if (img == EGL_NO_IMAGE_KHR) {
                 std::cerr << "[gpu] eglCreateImageKHR failed for fd=" << fd
                           << " (0x" << std::hex << eglGetError() << std::dec << ")\n";
