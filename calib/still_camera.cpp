@@ -193,8 +193,11 @@ struct StillCamera::Impl {
 
 std::vector<StillCamera::Info> StillCamera::list()
 {
+    // Held for the whole loop: a temporary in the range expression would be
+    // destroyed before the body runs, stopping the manager under the cameras.
+    const std::shared_ptr<CameraManager> cm = acquire_manager();
     std::vector<Info> out;
-    for (const std::shared_ptr<Camera> &cam : acquire_manager()->cameras()) {
+    for (const std::shared_ptr<Camera> &cam : cm->cameras()) {
         const auto model = cam->properties().get(properties::Model);
         out.push_back({cam->id(), model ? std::string(*model) : cam->id()});
     }
