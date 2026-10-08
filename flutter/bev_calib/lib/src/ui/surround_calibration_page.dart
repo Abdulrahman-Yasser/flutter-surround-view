@@ -60,6 +60,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
   int _previewGen = 0;
   List<SeamResult> _seams = const [];
   Map<CameraPosition, PositionState> _mounted = const {};
+  List<CameraInfo> _cameraList = const [];
 
   PinMarker _marker = PinMarker.plus;
   bool _showAll = true;
@@ -94,9 +95,14 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
       await _paths.installDefaultLayouts();
       await Directory(_paths.workDir).create(recursive: true);
       final all = CalibLayout.loadAll(_paths.layoutsDir);
-      final mounted = PositionState.read(_paths.configPath);
+      final positions = PositionState.read(_paths.configPath);
+      if (_paths.offlineImagesDir == null) {
+        CameraInfo.list().then((cams) {
+          if (mounted) setState(() => _cameraList = cams);
+        }, onError: (Object _) {});
+      }
       setState(() {
-        _mounted = mounted;
+        _mounted = positions;
         _layouts = all;
         _layout ??= all.isEmpty ? null : all.first;
       });
@@ -343,8 +349,8 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
   String _boardLabel(int i) {
     final b = _layout!.boards[i];
     return b.square
-        ? '${_boardName(i)} · black square'
-        : '${_boardName(i)} · ${b.squaresX}x${b.squaresY} · ids ${b.firstId}-${b.firstId + b.squaresX * b.squaresY ~/ 2 - 1}';
+        ? 'Board $i · ${_boardName(i)} · black square'
+        : 'Board $i · ${_boardName(i)} · ${b.squaresX}x${b.squaresY} · ids ${b.firstId}-${b.firstId + b.squaresX * b.squaresY ~/ 2 - 1}';
   }
 
   // The boards this camera can see: within 85 degrees of where it faces,
@@ -601,15 +607,57 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
           if (!(_mounted[c.position]?.assigned ?? false)) c.position,
       ];
 
+  // Model name, plus the port when another connected camera is the same model.
+  String _cameraName(CameraInfo c) {
+    final twin = _cameraList.where((o) => o.model == c.model).length > 1;
+    if (!twin) return c.model;
+    final parts = c.id.split('/');
+    return '${c.model} · ${parts.length > 1 ? parts[parts.length - 2] : c.id}';
+  }
+
+  void _assign(CameraPosition p, String id) {
+    try {
+      PositionState.assign(_paths.configPath, p, id);
+      setState(() => _mounted = PositionState.read(_paths.configPath));
+    } on CalibrationException catch (e) {
+      _toast('$e');
+    }
+  }
+
+  // Which connected camera is at each position the layout needs, set right
+  // here; it is the same assignment Settings > Cameras makes.
   Widget _positionsLine(CalibLayout l) {
-    final missing = _paths.offlineImagesDir != null ? const <CameraPosition>[] : _unmounted(l);
-    final needs = l.cameras.map((c) => c.position.label).join(', ');
-    return Text(
-      missing.isEmpty
-          ? 'Cameras: $needs'
-          : 'No camera at ${missing.map((p) => p.label).join(', ')}. Assign one in Settings > Cameras.',
-      style: TextStyle(color: missing.isEmpty ? Colors.white70 : _warn, fontSize: 12),
-    );
+    if (_paths.offlineImagesDir != null) {
+      return Text('Cameras: ${l.cameras.map((c) => c.position.label).join(', ')} (from saved stills)',
+          style: const TextStyle(color: Colors.white70, fontSize: 12));
+    }
+    final missing = _unmounted(l);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Wrap(spacing: 10, runSpacing: 4, children: [
+        for (final c in l.cameras)
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('${c.position.label}: ', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            DropdownButton<String>(
+              value: _cameraList.any((k) => k.id == _mounted[c.position]?.camera)
+                  ? _mounted[c.position]!.camera
+                  : null,
+              hint: Text(_mounted[c.position]?.assigned ?? false ? 'not connected' : 'choose camera',
+                  style: const TextStyle(color: _warn, fontSize: 12)),
+              isDense: true,
+              items: [
+                for (final k in _cameraList)
+                  DropdownMenuItem(value: k.id, child: Text(_cameraName(k), style: const TextStyle(fontSize: 12))),
+              ],
+              onChanged: (id) {
+                if (id != null) _assign(c.position, id);
+              },
+            ),
+          ]),
+      ]),
+      if (missing.isNotEmpty)
+        Text('Choose a camera for ${missing.map((p) => p.label).join(', ')}.',
+            style: const TextStyle(color: _warn, fontSize: 12)),
+    ]);
   }
 
   Widget _layoutCard(CalibLayout l) {
