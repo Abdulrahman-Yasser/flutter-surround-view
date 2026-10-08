@@ -10,6 +10,7 @@ class CalibPaths {
     required this.lensDir,
     required this.layoutsDir,
     required this.workDir,
+    this.capturesDir,
     this.offlineImagesDir,
   });
 
@@ -19,6 +20,21 @@ class CalibPaths {
 
   /// Scratch space for stills and previews.
   final String workDir;
+
+  /// Where every calibration run keeps its full-resolution images, one
+  /// folder per run, for looking into a calibration afterwards.
+  final String? capturesDir;
+
+  /// A new `<capturesDir>/<date>-<time>-<kind>` folder, or null without one.
+  String? newCaptureDir(String kind) {
+    final root = capturesDir;
+    if (root == null) return null;
+    final t = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    final dir = Directory('$root/${t.year}${two(t.month)}${two(t.day)}-${two(t.hour)}${two(t.minute)}${two(t.second)}-$kind');
+    dir.createSync(recursive: true);
+    return dir.path;
+  }
 
   /// When set, stills are read from `<dir>/<position>.png` (or .jpg) instead of
   /// the cameras, so the screens can be exercised without hardware.
@@ -44,6 +60,7 @@ class CalibPaths {
       lensDir: get('BEV_LENS_DIR') ?? (slash < 0 ? '.' : configPath.substring(0, slash)),
       layoutsDir: get('BEV_CALIB_LAYOUTS') ?? '$dataDir/layouts',
       workDir: '${Directory.systemTemp.path}/bev_calib',
+      capturesDir: get('BEV_CAPTURES') ?? '$dataDir/captures',
       offlineImagesDir: get('BEV_CALIB_IMAGES'),
     );
   }

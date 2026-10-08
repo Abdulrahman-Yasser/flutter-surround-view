@@ -519,7 +519,7 @@ class BoardSpec {
 
 class IntrinsicsStatus {
   const IntrinsicsStatus(this.corners, this.usable, this.views, this.width, this.height,
-      {this.markers = 0, this.idMin = -1, this.idMax = -1});
+      {this.markers = 0, this.idMin = -1, this.idMax = -1, this.centerX = 0, this.centerY = 0, this.extent = 0});
 
   final int corners;
   final bool usable;
@@ -527,6 +527,10 @@ class IntrinsicsStatus {
 
   /// Markers of the board's dictionary seen, whatever board they are on.
   final int markers, idMin, idMax;
+
+  /// Where the corners sit: their centre and bounding-box diagonal, as
+  /// fractions of the frame (0 when none are found).
+  final double centerX, centerY, extent;
 }
 
 class IntrinsicsResult {
@@ -576,7 +580,8 @@ class IntrinsicsSession {
           final s = arena<BevIntrStatus>();
           _withString(previewPath, (p) => _check(bev_intr_grab(Pointer.fromAddress(a), p, previewWidth, s)));
           return IntrinsicsStatus(s.ref.corners, s.ref.usable != 0, s.ref.views, s.ref.width, s.ref.height,
-              markers: s.ref.markers, idMin: s.ref.idMin, idMax: s.ref.idMax);
+              markers: s.ref.markers, idMin: s.ref.idMin, idMax: s.ref.idMax,
+              centerX: s.ref.centerX, centerY: s.ref.centerY, extent: s.ref.extent);
         }));
   }
 
@@ -588,6 +593,12 @@ class IntrinsicsSession {
       if (n < 0) throw CalibrationException(_lastError());
       return n;
     });
+  }
+
+  /// Writes the full frame of the view kept last.
+  Future<void> saveKept(String path) {
+    final a = _address;
+    return Isolate.run(() => _withString(path, (p) => _check(bev_intr_save_kept(Pointer.fromAddress(a), p))));
   }
 
   Future<IntrinsicsResult> calibrate() {

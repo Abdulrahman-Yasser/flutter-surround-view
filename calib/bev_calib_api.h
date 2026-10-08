@@ -171,6 +171,8 @@ typedef struct BevIntrStatus {
     int32_t corners, usable, views;
     int32_t width, height;
     int32_t markers, id_min, id_max;   // markers of the dictionary seen, any board
+    double center_x, center_y;         // the corners' centre, fraction of the frame
+    double extent;                     // their bounding box diagonal, fraction of the frame's
 } BevIntrStatus;
 
 typedef struct BevIntrResult {
@@ -196,6 +198,8 @@ BEV_CALIB_EXPORT int32_t bev_intr_grab(BevCalibIntrinsics *h, const char *previe
                                        int32_t preview_width, BevIntrStatus *out);
 // Keeps the last grab as a view. Returns the view count, or -1 if unusable.
 BEV_CALIB_EXPORT int32_t bev_intr_add(BevCalibIntrinsics *h);
+// Writes the full frame of the view kept last (PNG by the extension).
+BEV_CALIB_EXPORT int32_t bev_intr_save_kept(BevCalibIntrinsics *h, const char *path);
 BEV_CALIB_EXPORT int32_t bev_intr_calibrate(BevCalibIntrinsics *h, BevIntrResult *out);
 // Writes the last calibrate() result in the <lens>-lens.ini format.
 BEV_CALIB_EXPORT int32_t bev_intr_save(BevCalibIntrinsics *h, const char *lens_ini_path);

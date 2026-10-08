@@ -139,6 +139,12 @@ final class BevIntrStatus extends Struct {
   external int idMin;
   @Int32()
   external int idMax;
+  @Double()
+  external double centerX;
+  @Double()
+  external double centerY;
+  @Double()
+  external double extent;
 }
 
 final class BevIntrResult extends Struct {
@@ -301,6 +307,9 @@ external int bev_intr_grab(Pointer<BevCalibIntrinsics> h, Pointer<Char> previewP
 
 @Native<Int32 Function(Pointer<BevCalibIntrinsics>)>()
 external int bev_intr_add(Pointer<BevCalibIntrinsics> h);
+
+@Native<Int32 Function(Pointer<BevCalibIntrinsics>, Pointer<Char>)>()
+external int bev_intr_save_kept(Pointer<BevCalibIntrinsics> h, Pointer<Char> path);
 
 @Native<Int32 Function(Pointer<BevCalibIntrinsics>, Pointer<BevIntrResult>)>()
 external int bev_intr_calibrate(Pointer<BevCalibIntrinsics> h, Pointer<BevIntrResult> out);

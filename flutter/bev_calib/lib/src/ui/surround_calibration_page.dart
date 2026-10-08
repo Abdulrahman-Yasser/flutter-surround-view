@@ -61,6 +61,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
   List<SeamResult> _seams = const [];
   Map<CameraPosition, PositionState> _mounted = const {};
   List<CameraInfo> _cameraList = const [];
+  String? _captureDir;
 
   PinMarker _marker = PinMarker.plus;
   bool _showAll = true;
@@ -132,6 +133,10 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
       _toast('Cannot open ${layout.name}: $e');
       return;
     }
+    _captureDir = _paths.offlineImagesDir == null
+        ? _paths.newCaptureDir('surround-${layout.path.split('/').last.replaceAll('.ini', '')}')
+        : null;
+    if (_captureDir != null) File(layout.path).copySync('$_captureDir/${layout.path.split('/').last}');
     setState(() {
       _cams = [for (var i = 0; i < layout.cameras.length; i++) _Cam(i)];
       _cam = 0;
@@ -169,6 +174,8 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
         await _track(s.loadImage(i, offline));
       } else {
         await _track(s.capture(i));
+        // Kept at full resolution for looking into this calibration later.
+        if (_captureDir != null) await _track(s.saveImage(i, '$_captureDir/${position.key}.png'));
       }
       if (!mounted) return;
       setState(() => cam.status = 'Finding corners');

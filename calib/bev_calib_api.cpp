@@ -8,6 +8,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include <cmath>
 #include <cstring>
 #include <exception>
 #include <memory>
@@ -28,6 +29,7 @@ struct BevCalibIntrinsics {
     std::unique_ptr<IntrinsicsCalib> calib;
     IntrinsicsShot last;
     cv::Size last_size;
+    cv::Mat last_frame, kept_frame;
     IntrinsicsResult result;
 };
 
@@ -477,6 +479,7 @@ int32_t bev_intr_grab(BevCalibIntrinsics *h, const char *preview_path, int32_t p
     return guarded([&] {
         cv::Mat frame = h->camera->grab();
         h->last = h->calib->detect(frame);
+        h->last_frame = frame;
         h->last_size = frame.size();
 
         const double scale = (double)preview_width / frame.cols;
@@ -496,6 +499,13 @@ int32_t bev_intr_grab(BevCalibIntrinsics *h, const char *preview_path, int32_t p
         out->views = h->calib->views();
         out->width = frame.cols;
         out->height = frame.rows;
+        out->center_x = out->center_y = out->extent = 0;
+        if (!h->last.corners.empty()) {
+            const cv::Rect2f box = cv::boundingRect(h->last.corners);
+            out->center_x = (box.x + box.width / 2) / frame.cols;
+            out->center_y = (box.y + box.height / 2) / frame.rows;
+            out->extent = std::hypot(box.width, box.height) / std::hypot(frame.cols, frame.rows);
+        }
         out->markers = h->last.markers;
         out->id_min = h->last.id_min;
         out->id_max = h->last.id_max;
@@ -512,7 +522,16 @@ int32_t bev_intr_add(BevCalibIntrinsics *h)
         return -1;
     }
     h->last = IntrinsicsShot{};
+    h->kept_frame = h->last_frame;
     return h->calib->views();
+}
+
+int32_t bev_intr_save_kept(BevCalibIntrinsics *h, const char *path)
+{
+    if (!h) return fail("no session");
+    std::lock_guard<std::mutex> lock(h->mutex);
+    if (h->kept_frame.empty()) return fail("no view kept yet");
+    return guarded([&] { return cv::imwrite(path, h->kept_frame) ? 1 : fail(std::string("cannot write ") + path); });
 }
 
 int32_t bev_intr_calibrate(BevCalibIntrinsics *h, BevIntrResult *out)

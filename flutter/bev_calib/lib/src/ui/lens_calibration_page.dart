@@ -35,6 +35,14 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
   // The name last filled in for the chosen camera; a name typed over it is kept.
   String _suggested = '';
   bool _fisheye = false;
+
+  // Keep a view by itself once the board is well seen and somewhere new.
+  static const _autoMinCorners = 18;
+  bool _auto = true;
+  IntrinsicsStatus? _lastKept;
+  DateTime _lastKeptAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _keeping = false;
+  String? _captureDir;
   late final _squares = TextEditingController(text: '${widget.board.squaresX}x${widget.board.squaresY}');
   late final _square = TextEditingController(text: (widget.board.squareLen * 1000).toStringAsFixed(0));
   late final _marker = TextEditingController(text: (widget.board.markerLen * 1000).toStringAsFixed(0));
@@ -140,6 +148,14 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
     try {
       await Directory(widget.paths.workDir).create(recursive: true);
       _session = await IntrinsicsSession.open(_camera!, board, fisheye: _fisheye);
+      _lastKept = null;
+      _captureDir = widget.paths.newCaptureDir('lens-${_lens.text.trim()}');
+      if (_captureDir != null) {
+        File('$_captureDir/board.ini').writeAsStringSync('# ${_cameraName(_camera!)}, ${_fisheye ? 'fisheye' : 'pinhole'}\n'
+            '[camera]\nposition = front\n[board]\ndict = ${board.dict}\n'
+            'squares = ${board.squaresX}x${board.squaresY}\nsquare = ${board.squareLen}\n'
+            'marker = ${board.markerLen}\nlegacy = ${board.legacy ? 1 : 0}\n');
+      }
       _running = true;
       _loop = _grabLoop();
     } on CalibrationException catch (e) {
@@ -159,6 +175,7 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
           _status = st;
           _frame = bytes;
         });
+        if (_auto && _isNewView(st)) await _add();
       } on CalibrationException catch (e) {
         if (mounted) setState(() => _error = e.message);
         await Future<void>.delayed(const Duration(milliseconds: 500));
@@ -174,12 +191,33 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
     await s?.close();
   }
 
+  // Enough corners, a while since the last kept view, and the board moved or
+  // came nearer or farther: a pose the fit doesn't have yet.
+  bool _isNewView(IntrinsicsStatus st) {
+    if (!st.usable || st.corners < _autoMinCorners || _keeping) return false;
+    if (DateTime.now().difference(_lastKeptAt) < const Duration(milliseconds: 1500)) return false;
+    final last = _lastKept;
+    if (last == null) return true;
+    final moved = (Offset(st.centerX, st.centerY) - Offset(last.centerX, last.centerY)).distance;
+    final scaled = last.extent > 0 ? (st.extent / last.extent - 1).abs() : 1.0;
+    return moved > 0.08 || scaled > 0.15;
+  }
+
   Future<void> _add() async {
+    final st = _status;
+    _keeping = true;
     try {
       final n = await _session!.add();
-      setState(() => _status = IntrinsicsStatus(0, false, n, _status?.width ?? 0, _status?.height ?? 0));
+      _lastKept = st;
+      _lastKeptAt = DateTime.now();
+      if (_captureDir != null) {
+        await _session!.saveKept('$_captureDir/view_${n.toString().padLeft(2, '0')}.png');
+      }
+      if (mounted) setState(() => _status = IntrinsicsStatus(0, false, n, st?.width ?? 0, st?.height ?? 0));
     } on CalibrationException catch (e) {
       _toast('$e');
+    } finally {
+      _keeping = false;
     }
   }
 
@@ -383,11 +421,22 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
             style: small,
           ),
           const SizedBox(height: 10),
+          SwitchListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Auto capture', style: TextStyle(fontSize: 13)),
+            subtitle: const Text('Keeps a view by itself at $_autoMinCorners+ corners in a new pose',
+                style: TextStyle(fontSize: 11)),
+            value: _auto,
+            onChanged: (v) => setState(() => _auto = v),
+          ),
           FilledButton.icon(
-            onPressed: st?.usable == true ? _add : null,
+            onPressed: st?.usable == true && !_keeping ? _add : null,
             icon: const Icon(Icons.add_a_photo),
             label: const Text('Keep this view'),
           ),
+          if (_captureDir != null)
+            Text('Views saved in $_captureDir', style: const TextStyle(color: Colors.white38, fontSize: 11)),
           const SizedBox(height: 6),
           OutlinedButton(onPressed: views >= 3 ? _calibrate : null, child: const Text('Calibrate')),
           if (r != null) ...[
