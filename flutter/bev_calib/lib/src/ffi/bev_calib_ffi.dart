@@ -133,6 +133,12 @@ final class BevIntrStatus extends Struct {
   external int width;
   @Int32()
   external int height;
+  @Int32()
+  external int markers;
+  @Int32()
+  external int idMin;
+  @Int32()
+  external int idMax;
 }
 
 final class BevIntrResult extends Struct {

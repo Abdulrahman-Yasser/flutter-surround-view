@@ -82,6 +82,21 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
       ..showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  // Markers but no corners means the board fields don't describe the board
+  // in view. A ChArUco board of c x r squares carries c*r/2 markers numbered
+  // from its first id, so the highest id seen suggests sizes that would fit.
+  String _mismatchHint(IntrinsicsStatus st) {
+    final count = st.idMax + 1;
+    final fits = <String>[
+      for (var c = 3; c <= 12; c++)
+        for (var r = 3; r <= c; r++)
+          if (c * r ~/ 2 == count) '${c}x$r',
+    ];
+    return '${st.markers} markers (ids ${st.idMin}-${st.idMax}) seen but no corners: the board fields '
+        'don\'t match the board in view.'
+        '${fits.isEmpty ? '' : ' A board with $count markers is ${fits.join(' or ')} (columns x rows, either way round).'}';
+  }
+
   String _cameraName(String id) {
     final model = _cameras?.firstWhere((c) => c.id == id, orElse: () => CameraInfo(id, id)).model ?? id;
     for (final e in _mounted.entries) {
@@ -354,6 +369,8 @@ class _LensCalibrationPageState extends State<LensCalibrationPage> {
               st.usable ? '${st.corners} corners, good' : (st.corners > 0 ? '${st.corners} corners, not enough spread' : 'Board not found'),
               style: TextStyle(color: st.usable ? _good : _warn, fontSize: 13),
             ),
+            if (st.corners == 0 && st.markers >= 4)
+              Text(_mismatchHint(st), style: const TextStyle(color: _bad, fontSize: 12)),
           ],
           const SizedBox(height: 6),
           LinearProgressIndicator(value: (views / _recommendedViews).clamp(0.0, 1.0)),

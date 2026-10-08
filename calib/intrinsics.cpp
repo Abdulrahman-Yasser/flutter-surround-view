@@ -5,6 +5,7 @@
 #include <opencv2/calib3d.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <set>
@@ -21,7 +22,13 @@ IntrinsicsShot IntrinsicsCalib::detect(const cv::Mat &bgr) const
     IntrinsicsShot shot;
     cv::Mat gray;
     cv::cvtColor(bgr, gray, cv::COLOR_BGR2GRAY);
-    board_->interpolate(gray, CharucoModel::detect_markers(gray, board_->dict()), shot.corners, shot.ids);
+    const ArucoMarkers markers = CharucoModel::detect_markers(gray, board_->dict());
+    shot.markers = (int)markers.ids.size();
+    if (!markers.ids.empty()) {
+        shot.id_min = *std::min_element(markers.ids.begin(), markers.ids.end());
+        shot.id_max = *std::max_element(markers.ids.begin(), markers.ids.end());
+    }
+    board_->interpolate(gray, markers, shot.corners, shot.ids);
     if ((int)shot.ids.size() < min_corners_) return shot;
 
     // calibrateCamera's initial guess asserts on a view whose corners all sit

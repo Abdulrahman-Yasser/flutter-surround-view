@@ -14,6 +14,8 @@ struct IntrinsicsShot {
     std::vector<cv::Point2f> corners;
     std::vector<int> ids;
     bool usable = false;     // enough corners, spread over more than one row and column
+    int markers = 0;         // ArUco markers of the dictionary seen, on any board
+    int id_min = -1, id_max = -1;
 };
 
 struct IntrinsicsResult {

@@ -504,10 +504,10 @@ class CalibrationSession {
 class BoardSpec {
   const BoardSpec({
     this.dict = '4X4_50',
-    this.squaresX = 5,
-    this.squaresY = 8,
-    this.squareLen = 0.050,
-    this.markerLen = 0.037,
+    this.squaresX = 7,
+    this.squaresY = 5,
+    this.squareLen = 0.035,
+    this.markerLen = 0.026,
     this.legacy = true,
   });
 
@@ -518,11 +518,15 @@ class BoardSpec {
 }
 
 class IntrinsicsStatus {
-  const IntrinsicsStatus(this.corners, this.usable, this.views, this.width, this.height);
+  const IntrinsicsStatus(this.corners, this.usable, this.views, this.width, this.height,
+      {this.markers = 0, this.idMin = -1, this.idMax = -1});
 
   final int corners;
   final bool usable;
   final int views, width, height;
+
+  /// Markers of the board's dictionary seen, whatever board they are on.
+  final int markers, idMin, idMax;
 }
 
 class IntrinsicsResult {
@@ -571,7 +575,8 @@ class IntrinsicsSession {
     return Isolate.run(() => using((arena) {
           final s = arena<BevIntrStatus>();
           _withString(previewPath, (p) => _check(bev_intr_grab(Pointer.fromAddress(a), p, previewWidth, s)));
-          return IntrinsicsStatus(s.ref.corners, s.ref.usable != 0, s.ref.views, s.ref.width, s.ref.height);
+          return IntrinsicsStatus(s.ref.corners, s.ref.usable != 0, s.ref.views, s.ref.width, s.ref.height,
+              markers: s.ref.markers, idMin: s.ref.idMin, idMax: s.ref.idMax);
         }));
   }
 

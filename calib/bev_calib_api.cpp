@@ -496,6 +496,9 @@ int32_t bev_intr_grab(BevCalibIntrinsics *h, const char *preview_path, int32_t p
         out->views = h->calib->views();
         out->width = frame.cols;
         out->height = frame.rows;
+        out->markers = h->last.markers;
+        out->id_min = h->last.id_min;
+        out->id_max = h->last.id_max;
         return 1;
     });
 }

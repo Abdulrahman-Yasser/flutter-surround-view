@@ -170,6 +170,7 @@ typedef struct BevCalibIntrinsics BevCalibIntrinsics;
 typedef struct BevIntrStatus {
     int32_t corners, usable, views;
     int32_t width, height;
+    int32_t markers, id_min, id_max;   // markers of the dictionary seen, any board
 } BevIntrStatus;
 
 typedef struct BevIntrResult {
