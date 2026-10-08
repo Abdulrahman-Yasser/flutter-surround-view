@@ -197,6 +197,14 @@ static bool project(const Lens &lens, const cv::Matx33d &H, cv::Point2d w, cv::P
     return true;
 }
 
+// A raw pixel that shows something: inside the frame and not in the black
+// border a fisheye leaves around its image circle.
+static bool in_picture(const cv::Mat &gray, cv::Point2d p)
+{
+    if (p.x < 2 || p.y < 2 || p.x >= gray.cols - 3 || p.y >= gray.rows - 3) return false;
+    return cv::mean(gray(cv::Rect((int)p.x - 2, (int)p.y - 2, 5, 5)))[0] > 12;
+}
+
 // findHomography's sign is arbitrary. The renderer and project() need the
 // third row positive for points in front of the camera, which dividing by
 // H(2,2) only gets right when the car-frame origin is in front of it too.
@@ -410,10 +418,9 @@ bool CalibSession::find_square(int cam, int board, const cv::Matx33d &H,
 
     std::vector<cv::Point2d> pred(4);
     const std::vector<cv::Point2d> sheet = square_corners(side);
-    const cv::Rect2d frame(2, 2, c.gray.cols - 4, c.gray.rows - 4);
     double L = 0;
     for (int k = 0; k < 4; ++k)
-        if (!to_raw(sheet[k], pred[k]) || !frame.contains(pred[k])) return false;
+        if (!to_raw(sheet[k], pred[k]) || !in_picture(c.gray, pred[k])) return false;
     for (int k = 0; k < 4; ++k) L += cv::norm(pred[k] - pred[(k + 1) % 4]) / 4;
     if (L < 12) return false;
 
@@ -488,13 +495,19 @@ int CalibSession::add_missing(int cam)
     std::vector<bool> in;
     if (!fit(cam, H, in)) return -1;
     std::set<std::pair<int, int>> have;
-    for (const CalibPoint &p : c.points) have.insert({p.board, p.corner});
-    const cv::Rect2d frame(0, 0, c.gray.cols, c.gray.rows);
+    std::map<int, int> seen;   // board -> corners actually found on it
+    for (const CalibPoint &p : c.points) {
+        have.insert({p.board, p.corner});
+        if (!p.guessed) ++seen[p.board];
+    }
     int added = 0;
     for (size_t bi = 0; bi < world_.size(); ++bi) {
+        // A board this camera found nothing of may be hidden or out of reach;
+        // its corners are placed by hand if it is in fact there.
+        if (seen[(int)bi] < 2) continue;
         for (size_t k = 0; k < world_[bi].size(); ++k) {
             cv::Point2d raw;
-            if (have.count({(int)bi, (int)k}) || !project(c.lens, H, world_[bi][k], raw) || !frame.contains(raw))
+            if (have.count({(int)bi, (int)k}) || !project(c.lens, H, world_[bi][k], raw) || !in_picture(c.gray, raw))
                 continue;
             CalibPoint p;
             p.board = (int)bi;
