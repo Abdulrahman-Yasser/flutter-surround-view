@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -319,15 +320,63 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
     }
   }
 
+  // Where a board lies around the car, by the bearing of its centre: the
+  // nearest of the eight camera positions.
+  String _boardPlace(int i) {
+    final b = _layout!.boards[i];
+    final bearing = math.atan2(b.y, b.x) * 180 / math.pi;
+    double off(CameraPosition p) => ((bearing - p.facingDeg + 540) % 360 - 180).abs();
+    return CameraPosition.values.reduce((a, c) => off(c) < off(a) ? c : a).label;
+  }
+
+  // Numbered when several boards of one kind share a place.
+  String _boardName(int i) {
+    final b = _layout!.boards[i];
+    final place = _boardPlace(i);
+    final same = [
+      for (var k = 0; k < _layout!.boards.length; k++)
+        if (_layout!.boards[k].square == b.square && _boardPlace(k) == place) k,
+    ];
+    return same.length == 1 ? place : '$place ${same.indexOf(i) + 1}';
+  }
+
   String _boardLabel(int i) {
     final b = _layout!.boards[i];
     return b.square
-        ? 'Board $i · black square'
-        : 'Board $i · ${b.squaresX}x${b.squaresY} · ids ${b.firstId}-${b.firstId + b.squaresX * b.squaresY ~/ 2 - 1}';
+        ? '${_boardName(i)} · black square'
+        : '${_boardName(i)} · ${b.squaresX}x${b.squaresY} · ids ${b.firstId}-${b.firstId + b.squaresX * b.squaresY ~/ 2 - 1}';
+  }
+
+  // The boards this camera can see: within 85 degrees of where it faces,
+  // from where it is mounted, plus any it actually found corners on.
+  List<int> _cameraBoards(int cam) {
+    final l = _layout!;
+    final c = l.cameras[cam];
+    final mount = Offset(c.position.mountX * l.carWidth / 2, c.position.mountY * l.carLength / 2);
+    final rad = c.facingDeg * math.pi / 180;
+    final facing = Offset(math.cos(rad), math.sin(rad));
+    final found = {for (final p in _cams[cam].points) if (!p.guessed) p.board};
+    return [
+      for (var i = 0; i < l.boards.length; i++)
+        if (found.contains(i) ||
+            () {
+              final to = Offset(l.boards[i].x, l.boards[i].y) - mount;
+              final cos = (to.dx * facing.dx + to.dy * facing.dy) / math.max(to.distance, 1e-9);
+              return cos >= math.cos(85 * math.pi / 180);
+            }())
+          i,
+    ];
   }
 
   Widget _referencePanel(_Cam cam) {
     const small = TextStyle(color: Colors.white70, fontSize: 12);
+    final boards = _cameraBoards(cam.index);
+    if (boards.isEmpty) return const Text('No board of this layout is in front of this camera.', style: small);
+    if (!boards.contains(_refBoard)) {
+      _refBoard = boards.first;
+      _refCorner = null;
+      _placing = null;
+    }
     _updateReference();
     final corner = _refCorner;
     final pinIdx = corner == null
@@ -347,7 +396,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
         isExpanded: true,
         isDense: true,
         items: [
-          for (var i = 0; i < _layout!.boards.length; i++)
+          for (final i in boards)
             DropdownMenuItem(value: i, child: Text(_boardLabel(i), style: const TextStyle(fontSize: 12))),
         ],
         onChanged: (v) => setState(() {
