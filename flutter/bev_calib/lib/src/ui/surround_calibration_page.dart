@@ -425,6 +425,7 @@ class _SurroundCalibrationPageState extends State<SurroundCalibrationPage> {
                     },
                     selected: _refCorner,
                     marker: _marker,
+                    square: _layout!.boards[_refBoard].square,
                   ),
                 ),
               ),
@@ -924,6 +925,7 @@ class _ReferencePainter extends CustomPainter {
     required this.pins,
     required this.selected,
     required this.marker,
+    required this.square,
   });
 
   final List<Offset> corners;
@@ -931,29 +933,46 @@ class _ReferencePainter extends CustomPainter {
   final Map<int, CalibPointInfo> pins;
   final int? selected;
   final PinMarker marker;
+  final bool square;
 
   @override
   void paint(Canvas canvas, Size size) {
+    // A square's four corners sit far apart on plain black, so they get
+    // full-size pins and their numbers outside the square.
+    final scale = square ? 1.1 : 0.7;
+    final middle = corners.isEmpty
+        ? Offset.zero
+        : toPx(corners.reduce((a, b) => a + b) / corners.length.toDouble());
     for (var i = 0; i < corners.length; i++) {
-      if (i == selected) continue;
       final at = toPx(corners[i]);
+      if (square) {
+        final out = at - middle;
+        final label = TextPainter(
+          text: TextSpan(text: '$i', style: const TextStyle(color: Colors.black87, fontSize: 12, fontWeight: FontWeight.w700)),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final pos = at + out / out.distance * 18 - Offset(label.width / 2, label.height / 2);
+        label.paint(canvas, pos);
+      }
+      if (i == selected) continue;
       final pin = pins[i];
       if (pin == null) {
         canvas.drawCircle(
             at,
-            3,
+            square ? 6 : 3.5,
             Paint()
               ..color = Colors.blueGrey
               ..style = PaintingStyle.stroke
-              ..strokeWidth = 1);
+              ..strokeWidth = 1.5);
       } else {
-        paintPin(canvas, at, pinColor(pin), marker, scale: 0.7);
+        paintPin(canvas, at, pinColor(pin), marker, scale: scale);
       }
     }
     final sel = selected;
     if (sel != null && sel < corners.length) {
       final pin = pins[sel];
-      paintPin(canvas, toPx(corners[sel]), pin == null ? pinMoved : pinColor(pin), marker, selected: true, scale: 0.8);
+      paintPin(canvas, toPx(corners[sel]), pin == null ? pinMoved : pinColor(pin), marker,
+          selected: true, scale: square ? 1.0 : 0.8);
     }
   }
 
