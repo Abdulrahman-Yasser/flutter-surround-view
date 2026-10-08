@@ -25,6 +25,7 @@ class TopToolbar extends StatelessWidget {
     required this.onCalibrate,
     required this.onSnapshot,
     required this.onSettings,
+    required this.onClose,
     this.backendConnected = false,
   });
 
@@ -42,6 +43,7 @@ class TopToolbar extends StatelessWidget {
   final VoidCallback onCalibrate;
   final VoidCallback onSnapshot;
   final VoidCallback onSettings;
+  final VoidCallback onClose;
   final bool backendConnected;
 
   String _camLabel(String base, CameraPosition camera, bool selected) {
@@ -113,6 +115,12 @@ class TopToolbar extends StatelessWidget {
             label: 'Settings',
             selected: false,
             onTap: onSettings,
+          ),
+          _ToolbarButton(
+            icon: Icons.power_settings_new,
+            label: 'Close',
+            selected: false,
+            onTap: onClose,
           ),
           const SizedBox(width: 8),
           _BackendPill(connected: backendConnected),

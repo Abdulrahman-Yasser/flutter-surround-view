@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:bev_calib/bev_calib.dart';
 import 'package:flutter/material.dart';
 
@@ -148,6 +150,16 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
     if (saved == true) _toast(savedMessage);
   }
 
+  // AGL gives an app no close control and the app covers the home screen's
+  // bar, so it closes itself: views first, so the cameras are let go
+  // cleanly, then the process.
+  Future<void> _close() async {
+    setState(() => _suspended = true);
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    exit(0);
+  }
+
   void _openCameras() => _openCalibration((CalibPaths paths) => CamerasPage(paths: paths),
       savedMessage: 'Camera positions saved');
 
@@ -253,6 +265,7 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
               onCalibrate: _openSurroundCalibration,
               onSnapshot: () => _toast('Snapshot saved (mock)'),
               onSettings: _openSettings,
+              onClose: _close,
             ),
           ],
         ),
