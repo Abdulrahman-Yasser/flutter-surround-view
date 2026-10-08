@@ -53,6 +53,9 @@ class CalibPaths {
   Future<void> installDefaultLayouts() async {
     await Directory(layoutsDir).create(recursive: true);
     await Directory(lensDir).create(recursive: true);
+    // Offline stills belong to one layout, which whoever set them up puts in
+    // the layouts directory; the presets would only offer wrong ones.
+    if (offlineImagesDir != null) return;
     final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
     for (final asset in manifest.listAssets()) {
       if (!asset.startsWith('packages/bev_calib/layouts/') || !asset.endsWith('.ini')) continue;
