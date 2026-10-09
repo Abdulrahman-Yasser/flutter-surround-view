@@ -753,6 +753,18 @@ void CalibSession::apply(BevConfig &cfg) const
         s.facing_deg = cc.facing_deg;
         s.lens_model = cc.lens;
     }
+    // The view is centred on the car, so it spans twice the farthest board
+    // (or car edge) on each axis. Grown, never shrunk: calibrating the back
+    // pair after the front one mustn't crop the front boards out.
+    double half_w = layout_.car_width / 2, half_l = layout_.car_length / 2;
+    for (const auto &board : world_)
+        for (const cv::Point2d &p : board) {
+            half_w = std::max(half_w, std::abs(p.x));
+            half_l = std::max(half_l, std::abs(p.y));
+        }
+    const double margin = 0.5;
+    cfg.view_width_m = std::max(cfg.view_width_m, 2 * (half_w + margin));
+    cfg.view_length_m = std::max(cfg.view_length_m, 2 * (half_l + margin));
     cfg.car_width = layout_.car_width;
     cfg.car_length = layout_.car_length;
     cfg.car_x = 0.0;

@@ -531,7 +531,9 @@ bool BevPipeline::init_surround()
                                  "without it\n", params_.car_icon.c_str());
     }
 
-    const double px_per_m = params_.px_per_m_set ? params_.px_per_m : cfg.px_per_m;
+    double px_per_m = params_.px_per_m_set ? params_.px_per_m : cfg.px_per_m;
+    if (!params_.px_per_m_set && cfg.view_width_m > 0 && cfg.view_length_m > 0)
+        px_per_m = std::min(canvas_w / cfg.view_width_m, canvas_h / cfg.view_length_m);
     std::string lens_dir = params_.lens_dir;
     if (lens_dir.empty()) {
         const size_t slash = params_.config_path.find_last_of('/');

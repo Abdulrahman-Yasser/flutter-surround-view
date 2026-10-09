@@ -87,6 +87,11 @@ struct BevConfig {
     // camB u=[0.0,0.61]) instead of a degenerate sliver -- rescale (canvas
     // size scales with your source video's resolution) if that changes.
     double        px_per_m    = 2200.0;
+    // Ground the view shows, centred on the car, as written by the
+    // calibration screen (the car plus its boards). When set, the live view
+    // fits it to its canvas and px_per_m is ignored; 0 = unset.
+    double        view_width_m  = 0.0;
+    double        view_length_m = 0.0;
     // Angular half-width (degrees) of each camera's canvas coverage wedge,
     // centered on that slot's facing_deg (see BevSlotConfig::facing_deg).
     // Outside every camera's wedge, nothing is drawn there regardless of
