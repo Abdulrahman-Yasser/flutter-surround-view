@@ -135,10 +135,18 @@ int32_t bev_calib_config_assign(const char *config_path, int32_t position, const
     BevConfig cfg;
     if (!bev_config_load(config_path, cfg)) return fail(std::string("malformed ") + config_path);
     const std::string id = camera_id ? camera_id : "";
+    // The lens belongs to the camera, so it moves with it; a position's
+    // pose (hb2i) belongs to the position and stays.
+    std::string lens;
     if (!id.empty())
         for (BevSlotConfig &s : cfg.slots)
-            if (s.camera == id) s.camera.clear();
+            if (s.camera == id) {
+                lens = s.lens_model;
+                s.camera.clear();
+                s.lens_model.clear();
+            }
     cfg.slots[position].camera = id;
+    cfg.slots[position].lens_model = lens;
     return bev_config_save(config_path, cfg) ? 1 : fail(std::string("cannot write ") + config_path);
 }
 
@@ -209,6 +217,8 @@ BevCalibSession *bev_calib_open(const char *layout_path, const char *lens_dir, c
     try {
         auto s = std::make_unique<BevCalibSession>();
         for (const CalibCamera &c : l.cameras) s->camera_ids.push_back(cfg.slots[c.position].camera);
+        for (CalibCamera &c : l.cameras)
+            if (!cfg.slots[c.position].lens_model.empty()) c.lens = cfg.slots[c.position].lens_model;
         s->session = std::make_unique<CalibSession>(l, lens_dir ? lens_dir : ".");
         return s.release();
     } catch (const std::exception &e) {
