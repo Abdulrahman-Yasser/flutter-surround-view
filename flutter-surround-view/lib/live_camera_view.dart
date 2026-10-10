@@ -1,21 +1,27 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:bev_calib/bev_calib.dart';
 import 'package:bev_view/bev_view.dart';
 import 'package:flutter/material.dart';
 
 import 'bev_source.dart';
-import 'models.dart';
 
 class LiveCameraView extends StatefulWidget {
   const LiveCameraView({
     super.key,
-    required this.camera,
+    required this.position,
+    required this.cameraId,
     required this.birdsEye,
+    this.flat = false,
     this.showLabel = false,
   });
 
-  final CameraId camera;
+  final CameraPosition position;
+  final String cameraId;
+
+  /// The fisheye-corrected (undistorted) picture instead of the raw one.
+  final bool flat;
   final bool birdsEye;
   final bool showLabel;
 
@@ -46,12 +52,13 @@ class _LiveCameraViewState extends State<LiveCameraView> {
 
   @override
   Widget build(BuildContext context) {
-    final CameraId camera = widget.camera;
+    final CameraPosition position = widget.position;
     final bool birdsEye = widget.birdsEye;
-    final int index = camera.cameraIndex!;
     final BevSource source = birdsEye
-        ? birdsEyeSourceFromEnvironment(index)
-        : cameraSourceFromEnvironment(index);
+        ? birdsEyeSource(position)
+        : widget.flat
+            ? flatSource(position)
+            : cameraSource(widget.cameraId);
     return Container(
       margin: const EdgeInsets.all(3),
       clipBehavior: Clip.hardEdge,
@@ -64,7 +71,7 @@ class _LiveCameraViewState extends State<LiveCameraView> {
         fit: StackFit.expand,
         children: <Widget>[
           BevView(
-            key: ValueKey<String>('${camera.name}-$birdsEye'),
+            key: ValueKey<String>('${widget.cameraId}-${position.key}-$birdsEye-${widget.flat}'),
             source: source,
             onCreated: _onCreated,
           ),
@@ -105,7 +112,7 @@ class _LiveCameraViewState extends State<LiveCameraView> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   child: Text(
-                    birdsEye ? '${camera.label} BEV' : camera.label,
+                    birdsEye ? '${position.label} BEV' : widget.flat ? '${position.label} 2D' : position.label,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 12,

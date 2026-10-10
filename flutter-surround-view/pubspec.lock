@@ -9,6 +9,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.13.1"
+  bev_calib:
+    dependency: "direct main"
+    description:
+      path: "../flutter/bev_calib"
+      relative: true
+    source: path
+    version: "0.1.0"
   bev_view:
     dependency: "direct main"
     description:
@@ -288,5 +295,5 @@ packages:
     source: hosted
     version: "3.1.4"
 sdks:
-  dart: ">=3.11.1 <4.0.0"
+  dart: ">=3.10.0 <4.0.0"
   flutter: ">=3.27.1"

@@ -79,13 +79,24 @@ endif ()
 # object; hidden so that library exports only its bev_* C ABI.
 # egl_context.cpp is deliberately not in here: its HAVE_WAYLAND_PREVIEW half
 # belongs to the CLI only, so each target compiles it with its own defines.
+# bev_config.ini, lens files and the IPM math: pure CPU, shared with the
+# calibration library so both read and write the same format.
+add_library(bev_conf STATIC
+    ipm.cpp
+    bev_config.cpp
+    bev_setup.cpp
+)
+set_target_properties(bev_conf PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
+target_include_directories(bev_conf PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_library(bev_core STATIC
     capture_session.cpp
     gpu_renderer.cpp
     file_source.cpp
-    ipm.cpp
-    bev_config.cpp
-    bev_setup.cpp
 )
 set_target_properties(bev_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -100,6 +111,7 @@ target_include_directories(bev_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(bev_core PRIVATE extern/stb)
 
 target_link_libraries(bev_core PUBLIC
+    bev_conf
     PkgConfig::LIBCAMERA
     PkgConfig::DRM
     PkgConfig::GBM
@@ -179,7 +191,10 @@ if (ENABLE_IHS_PV)
     # -- ihs_pv: libihs_shared and the ihs/ ABI headers -----------------------
     # Either an ivi-homescreen checkout (IHS_DIR, with its build under
     # IHS_BUILD_DIR) or an installed ivi-homescreen-shared package.
-    if (NOT IHS_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../ivi-homescreen/shared/include/ihs/platform_view.h")
+    # An AGL SDK build turns this off: the sibling checkout would win over the
+    # sysroot's ivi-homescreen-shared package.
+    option(IHS_PROBE_SIBLING "Use a ../ivi-homescreen checkout when IHS_DIR is unset" ON)
+    if (IHS_PROBE_SIBLING AND NOT IHS_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../ivi-homescreen/shared/include/ihs/platform_view.h")
         get_filename_component(IHS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ivi-homescreen" ABSOLUTE)
     endif ()
 
@@ -298,10 +313,11 @@ if (ENABLE_IHS_PV)
         ihs/bev_ihs_pv.cpp
         ihs/bev_params.cpp
         ihs/bev_pipeline.cpp
+        ihs/cpu_frames.cpp
         ihs/dmabuf_ring.cpp
     )
     target_include_directories(bev_view PRIVATE ihs)
-    target_link_libraries(bev_view PRIVATE bev_core ihs_pv)
+    target_link_libraries(bev_view PRIVATE bev_core ihs_pv ${CMAKE_DL_LIBS})
     set_target_properties(bev_view PROPERTIES
         CXX_VISIBILITY_PRESET hidden
         VISIBILITY_INLINES_HIDDEN ON
@@ -324,4 +340,48 @@ if (ENABLE_IHS_PV)
                 "instead of the shell's device.")
         endif ()
     endif ()
+endif ()
+
+# ── ChArUco calibration (libbev_calib.so) ───────────────────────────────────
+# CPU only: OpenCV for board detection and the homography solve. Never runs
+# alongside libbev_view.so, so it can own the cameras while it is active.
+option(ENABLE_CALIB "Build the ChArUco calibration library and bev-calib CLI" OFF)
+
+if (ENABLE_CALIB)
+    find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs calib3d objdetect)
+    if (OpenCV_VERSION VERSION_LESS 4.7)
+        # Before 4.7 ChArUco lived in opencv_contrib's aruco module.
+        find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs calib3d aruco)
+    endif ()
+
+    add_library(bev_calib_core STATIC
+        calib/calib_layout.cpp
+        calib/calib_session.cpp
+        calib/charuco_board.cpp
+        calib/intrinsics.cpp
+        calib/lens.cpp
+    )
+    set_target_properties(bev_calib_core PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+    )
+    target_include_directories(bev_calib_core PUBLIC calib ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(bev_calib_core PUBLIC bev_conf ${OpenCV_LIBS})
+
+    add_executable(bev-calib calib/bev_calib_cli.cpp)
+    target_link_libraries(bev-calib PRIVATE bev_calib_core)
+    install(TARGETS bev-calib DESTINATION bin)
+
+    # Built by flutter/bev_calib's native-assets hook.
+    add_library(bev_calib SHARED
+        calib/bev_calib_api.cpp
+        calib/still_camera.cpp
+    )
+    target_link_libraries(bev_calib PRIVATE bev_calib_core PkgConfig::LIBCAMERA ${CMAKE_DL_LIBS})
+    set_target_properties(bev_calib PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+    )
+    target_link_options(bev_calib PRIVATE "LINKER:--no-undefined")
 endif ()

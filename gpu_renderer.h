@@ -105,6 +105,20 @@ public:
     void render_frame_multi(const std::vector<DmaBufFrame> &frames);
     bool init_multi_live(const EGLState &egl, int w, int h, int stride, int num_cameras);
     void render_frame_multi_live(const std::vector<const libcamera::FrameBuffer *> &bufs);
+
+    // How one camera's dma-bufs are imported: its size, stride and DRM fourcc
+    // (NV12, or packed YUYV/UYVY that the GPU converts while sampling).
+    struct Import {
+        int w = 0, h = 0, stride = 0;
+        uint32_t fourcc = 0;
+    };
+    // The DRM fourcc for a libcamera format the GPU might import; 0 if none.
+    static uint32_t drm_fourcc(const libcamera::PixelFormat &format);
+    // Sets live slot's import (defaults to the canvas size as NV12) and tries
+    // it on buf; false if the driver refuses that format.
+    bool set_live_import(int slot, const Import &import, const libcamera::FrameBuffer *buf);
+    // Single-camera mode's import, set before init(egl, sc, buffers).
+    void set_import(const Import &import) { import_ = import; }
     // Uploads one slot's homography + facing bearing (degrees, see
     // BEV_ALGORITHM.md's yaw->facing formula) — cheap, called per keypress
     // for just the changed slot, not all N.
@@ -116,11 +130,12 @@ public:
     // normalized by the caller (divided by that camera's own frame
     // width/height) -- NOT the raw pixel values a lens file stores; this
     // keeps the shader/API entirely in [0,1] uv terms with no separate
-    // image-size uniforms needed. has_distortion=false (the default state,
-    // no lens configured/found) skips the correction in the shader
-    // entirely, reproducing today's exact undistorted behavior at zero
-    // cost. Same cheap, per-keypress/per-lookup contract as set_ipm_multi().
-    void set_distortion_multi(int slot, bool has_distortion,
+    // image-size uniforms needed. lens_mode is lens_mode() from
+    // bev_setup.h: 0 (the default state, no lens configured/found) skips
+    // the correction in the shader entirely, 1 is the pinhole model above,
+    // 2 is cv::fisheye with k1..k4 passed as k1, k2, k3, p1.
+    // Same cheap, per-keypress/per-lookup contract as set_ipm_multi().
+    void set_distortion_multi(int slot, int lens_mode,
                               float fx, float fy, float cx, float cy,
                               float k1, float k2, float k3, float p1, float p2);
     int  num_cameras_multi() const { return num_cameras_multi_; }
@@ -146,6 +161,9 @@ public:
     // uCenter uniform (see kVS_CAR) from the last px_per_m set_px_per_m()
     // saw. No-op if init_car_icon() was never called/failed.
     void set_car_center(float center_x_m, float center_y_m);
+    // Car-frame point at the canvas centre, metres. The blend wedges and the
+    // car icon stay anchored to the car, not to the canvas.
+    void set_view_center(float x_m, float y_m);
 
     // N-camera surround-view BEV, multi-band (Laplacian pyramid) blend —
     // a separate, comparable alternative to init_multi()/render_frame_multi()
@@ -177,7 +195,7 @@ public:
     // dist{0,1,2}_pyr_ arrays, same as set_ipm_multi_pyramid() does for
     // H_pyr_/facing_pyr_; actual upload happens per-camera inside
     // render_frame_multi_pyramid().
-    void set_distortion_multi_pyramid(int slot, bool has_distortion,
+    void set_distortion_multi_pyramid(int slot, int lens_mode,
                                       float fx, float fy, float cx, float cy,
                                       float k1, float k2, float k3, float p1, float p2);
     int  num_cameras_multi_pyramid() const { return num_cameras_multi_pyramid_; }
@@ -200,6 +218,7 @@ public:
 private:
     bool        load_ext_fns();
     EGLImageKHR create_egl_image(const libcamera::FrameBuffer *buf);
+    EGLImageKHR create_egl_image(const libcamera::FrameBuffer *buf, const Import &import);
     EGLImageKHR create_egl_image(const DmaBufFrame &frame);
     void        cache_frame(int fd, EGLImageKHR img);
     void        upload_nv12(const DmaBufFrame &f, GLuint tex_y, GLuint tex_uv,
@@ -216,6 +235,8 @@ private:
     int             W_      = 0;
     int             H_      = 0;
     int             stride_ = 0;
+    Import          import_;               // single-camera mode; fourcc 0 = NV12 at W_ x H_
+    std::vector<Import> live_imports_;     // per live slot; fourcc 0 = NV12 at W_ x H_
 
     GLuint prog_      = 0;   // OES path (camera / DMA-BUF)
     GLuint prog_2d_   = 0;   // sampler2D path (single file)
@@ -266,6 +287,7 @@ private:
     // caller having to re-pass px_per_m every time, symmetric with
     // car_half_w_m_/car_half_l_m_ already being cached for the same reason.
     float  px_per_m_ = 100.0f;
+    float  view_cx_m_ = 0.0f, view_cy_m_ = 0.0f;
 
     // N-camera surround-view, multi-band (Laplacian pyramid) blend mode.
     // Own programs and own per-camera source textures — deliberately
@@ -318,8 +340,8 @@ private:
     // render_frame_multi_pyramid().
     GLint u_dist0_pyr_loc_ = -1, u_dist1_pyr_loc_ = -1, u_dist2_pyr_loc_ = -1;
     float dist0_pyr_[kPyramidMaxCameras][4] = {}; // fx,fy,cx,cy
-    float dist1_pyr_[kPyramidMaxCameras][4] = {}; // k1,k2,k3,p1
-    float dist2_pyr_[kPyramidMaxCameras][2] = {}; // p2,hasDistortion
+    float dist1_pyr_[kPyramidMaxCameras][4] = {}; // k1,k2,k3,p1 (k4 for fisheye)
+    float dist2_pyr_[kPyramidMaxCameras][2] = {}; // p2,lens mode
 
     int num_cameras_multi_pyramid_ = 0;
     int num_levels_multi_pyramid_  = 0;

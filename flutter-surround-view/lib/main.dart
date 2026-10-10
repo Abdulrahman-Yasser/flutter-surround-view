@@ -1,5 +1,9 @@
+import 'dart:io';
+
+import 'package:bev_calib/bev_calib.dart';
 import 'package:flutter/material.dart';
 
+import 'bev_source.dart';
 import 'controls.dart';
 import 'models.dart';
 import 'settings_page.dart';
@@ -38,25 +42,21 @@ const Set<ViewMode> _fullScreenModes = <ViewMode>{
   ViewMode.frontRear,
 };
 
-ViewMode _viewModeForCamera(CameraId camera) => switch (camera) {
-      CameraId.front => ViewMode.front,
-      CameraId.rear => ViewMode.rear,
-      CameraId.left => ViewMode.left,
-      CameraId.right => ViewMode.right,
-    };
-
 class _SurroundViewScreenState extends State<SurroundViewScreen> {
   ViewMode _mode = ViewMode.surround360;
-  CameraId _frontRearCamera = CameraId.front;
-  final Map<CameraId, CameraSubView> _camSubView = <CameraId, CameraSubView>{
-    for (final CameraId c in CameraId.values) c: CameraSubView.normal,
+  CameraPosition _position = CameraPosition.front;
+  CameraPosition _frontRearCamera = CameraPosition.front;
+  final Map<CameraPosition, CameraSubView> _camSubView = <CameraPosition, CameraSubView>{
+    for (final CameraPosition p in CameraPosition.values) p: CameraSubView.normal,
   };
+  Map<CameraPosition, PositionState> _mounted = readMountedCameras();
+
+  List<CameraPosition> get _mountedPositions => <CameraPosition>[
+        for (final CameraPosition p in CameraPosition.compass)
+          if (_mounted[p]?.assigned ?? false) p,
+      ];
   final Set<CameraOverlay> _overlays = <CameraOverlay>{};
-  bool _calibrating = false;
-  CameraId _calibCamera = CameraId.front;
-  final Map<CameraId, CalDelta> _deltas = <CameraId, CalDelta>{
-    for (final CameraId c in CameraId.values) c: CalDelta(),
-  };
+  bool _suspended = false;
 
   void _toast(String message) {
     ScaffoldMessenger.of(context)
@@ -66,33 +66,51 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
       );
   }
 
-  void _cameraTap(CameraId camera) => setState(() {
-        final ViewMode m = _viewModeForCamera(camera);
-        if (_mode == m) {
+  bool _transitioning = false;
+
+  // Forces a frame with no BevView mounted before the next one is built, so
+  // the outgoing view's platform-view dispose is sent before the incoming
+  // one's create. Skipping this let create race dispose and starve the
+  // camera release behind a blocked create call.
+  void _switchView(VoidCallback applyChange) {
+    if (_transitioning) return;
+    setState(() => _transitioning = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        applyChange();
+        _transitioning = false;
+      });
+    });
+  }
+
+  void _cameraTap(CameraPosition camera) => _switchView(() {
+        if (_mode == ViewMode.camera && _position == camera) {
           _camSubView[camera] = _camSubView[camera]!.next;
         } else {
-          _mode = m;
+          _mode = ViewMode.camera;
+          _position = camera;
           _camSubView[camera] = CameraSubView.normal;
         }
       });
 
-  void _sideViewsTap() => setState(() {
+  void _sideViewsTap() => _switchView(() {
         if (_mode == ViewMode.sideViews) {
-          final CameraSubView next = _camSubView[CameraId.left]!.next;
-          _camSubView[CameraId.left] = next;
-          _camSubView[CameraId.right] = next;
+          final CameraSubView next = _camSubView[CameraPosition.left]!.next;
+          _camSubView[CameraPosition.left] = next;
+          _camSubView[CameraPosition.right] = next;
         } else {
           _mode = ViewMode.sideViews;
-          _camSubView[CameraId.left] = CameraSubView.normal;
-          _camSubView[CameraId.right] = CameraSubView.normal;
+          _camSubView[CameraPosition.left] = CameraSubView.normal;
+          _camSubView[CameraPosition.right] = CameraSubView.normal;
         }
       });
 
-  void _frontRearTap() => setState(() {
+  void _frontRearTap() => _switchView(() {
         if (_mode == ViewMode.frontRear) {
-          _frontRearCamera = _frontRearCamera == CameraId.front
-              ? CameraId.rear
-              : CameraId.front;
+          _frontRearCamera = _frontRearCamera == CameraPosition.front
+              ? CameraPosition.back
+              : CameraPosition.front;
         } else {
           _mode = ViewMode.frontRear;
         }
@@ -102,93 +120,116 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
         if (!_overlays.remove(o)) _overlays.add(o);
       });
 
-  void _nudge(CalAxis axis, int sign) => setState(() {
-        final CalDelta d = _deltas[_calibCamera]!;
-        switch (axis) {
-          case CalAxis.x:
-            d.x += sign * 1.0;
-          case CalAxis.y:
-            d.y += sign * 1.0;
-          case CalAxis.yaw:
-            d.yaw += sign * 0.5;
-        }
-      });
+  // Calibration needs the cameras, which a live BevView holds. A pushed route
+  // keeps this screen mounted, so first build a frame with no view at all,
+  // then open the page; the views come back (with the new calibration) on
+  // return.
+  Future<void> _openCalibration(Widget Function(CalibPaths paths) page,
+      {String savedMessage = 'Calibration saved'}) async {
+    if (_suspended) return;
+    setState(() => _suspended = true);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    final bool? saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(builder: (BuildContext context) => page(calibPaths)),
+    );
+    if (!mounted) return;
+    setState(() {
+      _suspended = false;
+      _mounted = readMountedCameras();
+      final bool gone = switch (_mode) {
+        ViewMode.camera => !_mountedPositions.contains(_position),
+        ViewMode.sideViews =>
+          !_mountedPositions.contains(CameraPosition.left) || !_mountedPositions.contains(CameraPosition.right),
+        ViewMode.frontRear =>
+          !_mountedPositions.contains(CameraPosition.front) || !_mountedPositions.contains(CameraPosition.back),
+        ViewMode.surround360 => false,
+      };
+      if (gone) _mode = ViewMode.surround360;
+    });
+    if (saved == true) _toast(savedMessage);
+  }
+
+  // AGL gives an app no close control and the app covers the home screen's
+  // bar, so it closes itself: views first, so the cameras are let go
+  // cleanly, then the process.
+  Future<void> _close() async {
+    setState(() => _suspended = true);
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    exit(0);
+  }
+
+  void _openCameras() => _openCalibration((CalibPaths paths) => CamerasPage(paths: paths),
+      savedMessage: 'Camera positions saved');
+
+  void _openSurroundCalibration() =>
+      _openCalibration((CalibPaths paths) => SurroundCalibrationPage(paths: paths));
+
+  void _openLensCalibration() =>
+      _openCalibration((CalibPaths paths) => LensCalibrationPage(paths: paths));
 
   void _openSettings() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => SettingsPage(
-          initialDeltas: _deltas,
-          onSave: (CameraId camera, CalDelta delta) => setState(() {
-            _deltas[camera] = delta;
-            _toast('Calibration saved for ${camera.label} (mock)');
-          }),
-          onReset: (CameraId camera) => setState(() {
-            _deltas[camera] = CalDelta();
-          }),
+          paths: calibPaths,
+          onSurroundCalibration: _openSurroundCalibration,
+          onLensCalibration: _openLensCalibration,
+          onCameras: _openCameras,
         ),
       ),
     );
   }
 
   String _modeTagLabel() {
-    if (_mode == ViewMode.frontRear) return '${_frontRearCamera.label} view';
-    final CameraId? cam = _mode.asCamera;
-    if (cam != null) {
-      final CameraSubView sub = _camSubView[cam]!;
-      return sub == CameraSubView.normal
-          ? '${_mode.label} view'
-          : '${_mode.label} - ${sub.label}';
+    switch (_mode) {
+      case ViewMode.surround360:
+        return '360° view';
+      case ViewMode.frontRear:
+        return '${_frontRearCamera.label} view';
+      case ViewMode.camera:
+        final CameraSubView sub = _camSubView[_position]!;
+        return sub == CameraSubView.normal
+            ? '${_position.label} view'
+            : '${_position.label} - ${sub.label}';
+      case ViewMode.sideViews:
+        final CameraSubView sub = _camSubView[CameraPosition.left]!;
+        return sub == CameraSubView.normal
+            ? 'Left + Right view'
+            : 'Left + Right - ${sub.label}';
     }
-    if (_mode == ViewMode.sideViews) {
-      final CameraSubView sub = _camSubView[CameraId.left]!;
-      return sub == CameraSubView.normal
-          ? 'Left + Right view'
-          : 'Left + Right - ${sub.label}';
-    }
-    return '${_mode.label} view';
   }
 
   Widget _controlledView() {
     return Stack(
       children: <Widget>[
         Positioned.fill(
-          child: CameraViewport(
-            mode: _mode,
-            overlays: _overlays,
-            camSubViews: _camSubView,
-            frontRearCamera: _frontRearCamera,
-          ),
+          child: _transitioning
+              ? const ColoredBox(color: Color(0xFF0A0A0C))
+              : CameraViewport(
+                  mode: _mode,
+                  position: _position,
+                  mounted: _mounted,
+                  overlays: _overlays,
+                  camSubViews: _camSubView,
+                  frontRearCamera: _frontRearCamera,
+                ),
         ),
         Positioned(
           left: 10,
           top: 10,
           child: _ModeTag(label: _modeTagLabel()),
         ),
-        if (_calibrating)
-          Positioned(
-            left: 10,
-            bottom: 10,
-            child: CalibrationPanel(
-              camera: _calibCamera,
-              delta: _deltas[_calibCamera]!,
-              onSelectCamera: (CameraId c) =>
-                  setState(() => _calibCamera = c),
-              onNudge: _nudge,
-              onSave: () => _toast(
-                'Calibration saved for '
-                '${_calibCamera.label} (mock)',
-              ),
-              onReset: () =>
-                  setState(() => _deltas[_calibCamera] = CalDelta()),
-            ),
-          ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_suspended) {
+      return const Scaffold(backgroundColor: Color(0xFF0A0A0C));
+    }
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -199,11 +240,11 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
                   : Row(
                       children: <Widget>[
                         Expanded(flex: 7, child: _controlledView()),
-                        const Expanded(
+                        Expanded(
                           flex: 3,
                           child: ColoredBox(
-                            color: Color(0xFF0A0A0C),
-                            child: BevPlaceholder(),
+                            color: const Color(0xFF0A0A0C),
+                            child: BevPlaceholder(mounted: _mounted),
                           ),
                         ),
                       ],
@@ -211,19 +252,20 @@ class _SurroundViewScreenState extends State<SurroundViewScreen> {
             ),
             TopToolbar(
               mode: _mode,
-              onModeChanged: (ViewMode m) => setState(() => _mode = m),
+              position: _position,
+              mounted: _mountedPositions,
+              onSurroundTap: () => _switchView(() => _mode = ViewMode.surround360),
               camSubViews: _camSubView,
               onCameraTap: _cameraTap,
               onSideViewsTap: _sideViewsTap,
               frontRearCamera: _frontRearCamera,
               onFrontRearTap: _frontRearTap,
               overlays: _overlays,
-              calibrating: _calibrating,
               onToggleOverlay: _toggleOverlay,
-              onToggleCalibrate: () =>
-                  setState(() => _calibrating = !_calibrating),
+              onCalibrate: _openSurroundCalibration,
               onSnapshot: () => _toast('Snapshot saved (mock)'),
               onSettings: _openSettings,
+              onClose: _close,
             ),
           ],
         ),

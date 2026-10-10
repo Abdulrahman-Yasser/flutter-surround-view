@@ -1,5 +1,7 @@
+import 'package:bev_calib/bev_calib.dart';
 import 'package:flutter/material.dart';
 
+import 'bev_source.dart';
 import 'live_camera_view.dart';
 import 'models.dart';
 import 'surround_view.dart';
@@ -8,31 +10,35 @@ class CameraViewport extends StatelessWidget {
   const CameraViewport({
     super.key,
     required this.mode,
+    required this.position,
+    required this.mounted,
     required this.overlays,
     required this.camSubViews,
-    this.frontRearCamera = CameraId.front,
+    this.frontRearCamera = CameraPosition.front,
   });
 
   final ViewMode mode;
+  final CameraPosition position;
+  final Map<CameraPosition, PositionState> mounted;
   final Set<CameraOverlay> overlays;
-  final CameraId frontRearCamera;
-  final Map<CameraId, CameraSubView> camSubViews;
+  final CameraPosition frontRearCamera;
+  final Map<CameraPosition, CameraSubView> camSubViews;
+
+  Widget _single(CameraPosition p) =>
+      SingleCameraView(position: p, state: mounted[p], subView: camSubViews[p]!, showLabel: true);
 
   @override
   Widget build(BuildContext context) {
     final Widget content = switch (mode) {
-      ViewMode.surround360 => const SurroundView(),
-      ViewMode.sideViews => _SideViews(subViews: camSubViews),
-      ViewMode.frontRear => SingleCameraView(
-          camera: frontRearCamera,
-          subView: camSubViews[frontRearCamera]!,
-          showLabel: true,
+      ViewMode.surround360 => SurroundView(source: surroundSource(mounted)),
+      ViewMode.sideViews => Row(
+          children: <Widget>[
+            Expanded(child: _single(CameraPosition.left)),
+            Expanded(child: _single(CameraPosition.right)),
+          ],
         ),
-      _ => SingleCameraView(
-          camera: mode.asCamera!,
-          subView: camSubViews[mode.asCamera!]!,
-          showLabel: true,
-        ),
+      ViewMode.frontRear => _single(frontRearCamera),
+      ViewMode.camera => _single(position),
     };
 
     final bool showOverlays = mode != ViewMode.surround360;
@@ -57,94 +63,45 @@ class CameraViewport extends StatelessWidget {
   }
 }
 
-class Surround360Placeholder extends StatelessWidget {
-  const Surround360Placeholder({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(Icons.threesixty, size: 64, color: Colors.white24),
-          SizedBox(height: 8),
-          Text(
-            '360° panorama\nstitched output goes here',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white38, fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SideViews extends StatelessWidget {
-  const _SideViews({required this.subViews});
-
-  final Map<CameraId, CameraSubView> subViews;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: SingleCameraView(
-            camera: CameraId.left,
-            subView: subViews[CameraId.left]!,
-            showLabel: true,
-          ),
-        ),
-        Expanded(
-          child: SingleCameraView(
-            camera: CameraId.right,
-            subView: subViews[CameraId.right]!,
-            showLabel: true,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class SingleCameraView extends StatelessWidget {
   const SingleCameraView({
     super.key,
-    required this.camera,
+    required this.position,
+    required this.state,
     required this.subView,
     this.showLabel = false,
   });
 
-  final CameraId camera;
+  final CameraPosition position;
+  final PositionState? state;
   final CameraSubView subView;
   final bool showLabel;
 
   @override
   Widget build(BuildContext context) {
-    if (camera.cameraIndex != null) {
-      return switch (subView) {
-        CameraSubView.normal =>
-          LiveCameraView(camera: camera, birdsEye: false, showLabel: showLabel),
-        CameraSubView.bev =>
-          LiveCameraView(camera: camera, birdsEye: true, showLabel: showLabel),
-        _ => _CameraSubViewPlaceholder(camera: camera, subView: subView),
-      };
+    final PositionState? s = state;
+    if (s == null || !s.assigned) {
+      return _Notice(position: position, text: 'No camera mounted here.\nSettings > Cameras.');
     }
     return switch (subView) {
-      CameraSubView.normal => CameraBox(camera: camera, showLabel: showLabel),
-      _ => _CameraSubViewPlaceholder(camera: camera, subView: subView),
+      CameraSubView.normal =>
+        LiveCameraView(position: position, cameraId: s.camera, birdsEye: false, showLabel: showLabel),
+      CameraSubView.bev when s.calibrated =>
+        LiveCameraView(position: position, cameraId: s.camera, birdsEye: true, showLabel: showLabel),
+      CameraSubView.bev =>
+        _Notice(position: position, text: 'Not calibrated yet.\nSettings > Surround calibration.'),
+      // A fisheye flattened; a normal lens has nothing to flatten.
+      CameraSubView.calibrated2d => LiveCameraView(
+          position: position, cameraId: s.camera, birdsEye: false, flat: isFisheye(s), showLabel: showLabel),
     };
   }
 }
 
-class _CameraSubViewPlaceholder extends StatelessWidget {
-  const _CameraSubViewPlaceholder({
-    required this.camera,
-    required this.subView,
-  });
+class _Notice extends StatelessWidget {
+  const _Notice({required this.position, required this.text});
 
-  final CameraId camera;
-  final CameraSubView subView;
+  final CameraPosition position;
+  final String text;
 
   @override
   Widget build(BuildContext context) {
@@ -159,16 +116,10 @@ class _CameraSubViewPlaceholder extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(
-              subView == CameraSubView.bev
-                  ? Icons.directions_car
-                  : Icons.crop_free,
-              size: 40,
-              color: Colors.white24,
-            ),
+            const Icon(Icons.videocam_off, size: 40, color: Colors.white24),
             const SizedBox(height: 6),
             Text(
-              '${camera.label} - ${subView.label} placeholder',
+              '${position.label}\n$text',
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white38, fontSize: 12),
             ),
@@ -179,68 +130,12 @@ class _CameraSubViewPlaceholder extends StatelessWidget {
   }
 }
 
-class CameraBox extends StatelessWidget {
-  const CameraBox({super.key, required this.camera, this.showLabel = false});
-
-  final CameraId camera;
-  final bool showLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.all(3),
-      clipBehavior: Clip.hardEdge,
-      decoration: BoxDecoration(
-        color: Colors.black,
-        border: Border.all(color: Colors.white12),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: <Widget>[
-          Image.asset(
-            camera.asset,
-            fit: BoxFit.cover,
-            gaplessPlayback: true,
-            errorBuilder: (BuildContext context, Object error, StackTrace? stack) {
-              return const ColoredBox(
-                color: Color(0xFF1E1E1E),
-                child: Center(
-                  child: Icon(Icons.videocam_off, color: Colors.white24),
-                ),
-              );
-            },
-          ),
-          if (showLabel)
-            Positioned(
-              left: 8,
-              top: 8,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Text(
-                    camera.label,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
+/// The right-hand panel next to a single camera: where the mounted cameras
+/// are around the car.
 class BevPlaceholder extends StatelessWidget {
-  const BevPlaceholder({super.key});
+  const BevPlaceholder({super.key, required this.mounted});
+
+  final Map<CameraPosition, PositionState> mounted;
 
   @override
   Widget build(BuildContext context) {
@@ -250,24 +145,13 @@ class BevPlaceholder extends StatelessWidget {
         child: AspectRatio(
           aspectRatio: 3 / 4,
           child: Stack(
-            alignment: Alignment.center,
-            children: const <Widget>[
-              Align(alignment: Alignment.topCenter, child: _BevThumb(CameraId.front)),
-              Align(alignment: Alignment.bottomCenter, child: _BevThumb(CameraId.rear)),
-              Align(alignment: Alignment.centerLeft, child: _BevThumb(CameraId.left)),
-              Align(alignment: Alignment.centerRight, child: _BevThumb(CameraId.right)),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Icon(Icons.directions_car, size: 56, color: Colors.white24),
-                  SizedBox(height: 8),
-                  Text(
-                    "Bird's-eye view\nstitched output goes here",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
-                ],
-              ),
+            children: <Widget>[
+              const Center(child: Icon(Icons.directions_car, size: 56, color: Colors.white24)),
+              for (final CameraPosition p in CameraPosition.values)
+                Align(
+                  alignment: Alignment(p.mountX, -p.mountY),
+                  child: _Badge(position: p, used: mounted[p]?.assigned ?? false),
+                ),
             ],
           ),
         ),
@@ -276,17 +160,24 @@ class BevPlaceholder extends StatelessWidget {
   }
 }
 
-class _BevThumb extends StatelessWidget {
-  const _BevThumb(this.camera);
+class _Badge extends StatelessWidget {
+  const _Badge({required this.position, required this.used});
 
-  final CameraId camera;
+  final CameraPosition position;
+  final bool used;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 96,
-      height: 72,
-      child: CameraBox(camera: camera, showLabel: true),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: used ? const Color(0xFF3D7EFF) : Colors.white10,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        position.short,
+        style: TextStyle(color: used ? Colors.white : Colors.white30, fontSize: 11, fontWeight: FontWeight.w600),
+      ),
     );
   }
 }

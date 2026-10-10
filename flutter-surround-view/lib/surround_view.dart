@@ -4,17 +4,17 @@ import 'dart:io';
 import 'package:bev_view/bev_view.dart';
 import 'package:flutter/material.dart';
 
-import 'bev_source.dart';
-
 class SurroundView extends StatefulWidget {
-  const SurroundView({super.key});
+  const SurroundView({super.key, required this.source});
+
+  /// Null when no camera is both mounted and calibrated.
+  final BevSource? source;
 
   @override
   State<SurroundView> createState() => _SurroundViewState();
 }
 
 class _SurroundViewState extends State<SurroundView> {
-  static final BevSource _source = surroundSourceFromEnvironment();
   static final bool _showStats = Platform.environment['BEV_STAT'] == '1';
 
   Timer? _poll;
@@ -49,10 +49,21 @@ class _SurroundViewState extends State<SurroundView> {
 
   @override
   Widget build(BuildContext context) {
+    final BevSource? source = widget.source;
+    if (source == null) {
+      return const Center(
+        child: Text(
+          'No camera is mounted and calibrated yet.\n'
+          'Settings > Cameras, then Settings > Surround calibration.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white54, fontSize: 13),
+        ),
+      );
+    }
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
-        BevView(source: _source, onCreated: _onCreated),
+        BevView(source: source, onCreated: _onCreated),
         if (_showStats)
           Positioned(
             right: 10,

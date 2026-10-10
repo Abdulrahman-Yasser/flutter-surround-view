@@ -1,0 +1,211 @@
+// C ABI of libbev_calib.so, the ChArUco calibration library. Dart
+// (flutter/bev_calib, via @Native) is the only consumer.
+//
+// Never use the cameras while a libbev_view.so view is live: libcamera allows
+// one camera manager per process, so opening one here waits for the view's to
+// be gone, and the view waits for this library's in turn.
+//
+// Calls returning int32_t give 1 (or a count) on success and 0 or -1 on
+// failure, with the reason in bev_calib_last_error() on the calling thread.
+// A handle may be used from any thread, one call at a time.
+
+#ifndef BEV_CALIB_API_H_
+#define BEV_CALIB_API_H_
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define BEV_CALIB_EXPORT __attribute__((visibility("default")))
+
+BEV_CALIB_EXPORT const char *bev_calib_last_error(void);
+
+// 1 while this library holds a camera manager.
+BEV_CALIB_EXPORT int32_t bev_calib_camera_active(void);
+
+// Cameras libcamera enumerates, or -1.
+BEV_CALIB_EXPORT int32_t bev_calib_cameras_present(void);
+
+// ── Cameras and where they are mounted ───────────────────────────────────────
+
+typedef struct BevCalibCameraEntry {
+    char id[256];               // libcamera's stable id, what bev_config.ini stores
+    char model[64];
+} BevCalibCameraEntry;
+
+// Fills up to cap entries; returns how many cameras there are, or -1.
+BEV_CALIB_EXPORT int32_t bev_calib_camera_list(BevCalibCameraEntry *out, int32_t cap);
+// One frame from that camera as a JPEG scaled to width. Blocks for a moment.
+BEV_CALIB_EXPORT int32_t bev_calib_camera_snapshot(const char *camera_id, const char *jpeg_path,
+                                                   int32_t width);
+
+// Positions are BevPosition indices, 0 .. 7 (bev_config.h).
+BEV_CALIB_EXPORT const char *bev_calib_position_name(int32_t position);
+
+typedef struct BevCalibPosition {
+    char camera[256];           // empty: nothing mounted there
+    char lens[64];
+    int32_t calibrated;         // has a surround homography
+} BevCalibPosition;
+
+BEV_CALIB_EXPORT int32_t bev_calib_config_position(const char *config_path, int32_t position,
+                                                   BevCalibPosition *out);
+// Puts camera_id at position (empty clears it), taking it off any other
+// position, and saves config_path.
+BEV_CALIB_EXPORT int32_t bev_calib_config_assign(const char *config_path, int32_t position,
+                                                 const char *camera_id);
+// Sets the lens the camera at position uses (<lens_dir>/<lens>-lens.ini) and
+// saves config_path.
+BEV_CALIB_EXPORT int32_t bev_calib_config_set_lens(const char *config_path, int32_t position,
+                                                   const char *lens);
+
+// ── Layout files ─────────────────────────────────────────────────────────────
+
+typedef struct BevCalibLayoutInfo {
+    char name[64];
+    double car_width, car_length;
+    int32_t cameras, boards;
+} BevCalibLayoutInfo;
+
+typedef struct BevCalibCameraInfo {
+    int32_t position;           // where it is mounted, a BevPosition index
+    double facing_deg;
+    char lens[64];
+} BevCalibCameraInfo;
+
+typedef struct BevCalibBoardInfo {
+    char dict[32];
+    int32_t squares_x, squares_y, first_id;
+    double square_len, marker_len;
+    double x, y, yaw_deg;       // centre in the car frame, metres / degrees
+    int32_t square;             // a plain black square of side square_len, 1x1, no dict
+} BevCalibBoardInfo;
+
+BEV_CALIB_EXPORT int32_t bev_calib_layout_info(const char *path, BevCalibLayoutInfo *out);
+BEV_CALIB_EXPORT int32_t bev_calib_layout_camera(const char *path, int32_t index, BevCalibCameraInfo *out);
+BEV_CALIB_EXPORT int32_t bev_calib_layout_board(const char *path, int32_t index, BevCalibBoardInfo *out);
+
+// ── Surround (extrinsic) calibration over a layout ───────────────────────────
+
+typedef struct BevCalibSession BevCalibSession;
+
+typedef struct BevCalibPoint {
+    float x, y;                 // still pixel
+    double world_x, world_y;    // car frame, metres
+    int32_t board, corner, moved, inlier;
+    int32_t guessed;            // square corner placed by prediction; ignored until moved
+} BevCalibPoint;
+
+typedef struct BevCalibSolve {
+    int32_t ok, inliers;
+    double rms_px, max_px;
+    double ground_rms_mm, ground_max_mm;
+} BevCalibSolve;
+
+typedef struct BevCalibSeam {
+    int32_t cam_a, cam_b, shared;
+    double median_mm, max_mm;
+} BevCalibSeam;
+
+// Cameras are indexed in layout order, and capture from the camera
+// config_path assigns to each one's position. A lens file missing from
+// lens_dir is not an error; bev_calib_has_lens() reports it.
+BEV_CALIB_EXPORT BevCalibSession *bev_calib_open(const char *layout_path, const char *lens_dir,
+                                                 const char *config_path);
+BEV_CALIB_EXPORT void bev_calib_close(BevCalibSession *s);
+BEV_CALIB_EXPORT int32_t bev_calib_has_lens(BevCalibSession *s, int32_t cam);
+// Uses "<lens_dir>/<lens>-lens.ini" for cam instead of the layout's lens, and
+// saves that name as the slot's lens_model. An empty lens means none.
+BEV_CALIB_EXPORT int32_t bev_calib_set_lens(BevCalibSession *s, int32_t cam, const char *lens_dir,
+                                            const char *lens);
+
+// Full-resolution still from the camera at that position, after settle_frames frames
+// of auto exposure. Blocks for a few seconds.
+BEV_CALIB_EXPORT int32_t bev_calib_capture(BevCalibSession *s, int32_t cam, int32_t settle_frames);
+BEV_CALIB_EXPORT int32_t bev_calib_load_image(BevCalibSession *s, int32_t cam, const char *path);
+BEV_CALIB_EXPORT int32_t bev_calib_save_image(BevCalibSession *s, int32_t cam, const char *path);
+BEV_CALIB_EXPORT int32_t bev_calib_image_size(BevCalibSession *s, int32_t cam, int32_t *w, int32_t *h);
+
+BEV_CALIB_EXPORT int32_t bev_calib_detect(BevCalibSession *s, int32_t cam);
+BEV_CALIB_EXPORT int32_t bev_calib_point_count(BevCalibSession *s, int32_t cam);
+BEV_CALIB_EXPORT int32_t bev_calib_point(BevCalibSession *s, int32_t cam, int32_t index, BevCalibPoint *out);
+BEV_CALIB_EXPORT int32_t bev_calib_move_point(BevCalibSession *s, int32_t cam, int32_t index, float x, float y);
+BEV_CALIB_EXPORT int32_t bev_calib_solve(BevCalibSession *s, int32_t cam, BevCalibSolve *out);
+
+// Adds every undetected corner in the frame as a guessed point where the
+// corners found so far predict it. Returns how many, or -1 (fewer than 4).
+BEV_CALIB_EXPORT int32_t bev_calib_add_missing(BevCalibSession *s, int32_t cam);
+// Places a board corner by hand at (x, y): moves its point or adds one.
+// Returns the point's index, or -1.
+BEV_CALIB_EXPORT int32_t bev_calib_place_point(BevCalibSession *s, int32_t cam, int32_t board,
+                                               int32_t corner, float x, float y);
+
+// A board's corners on the printed sheet, metres from its top-left, +y down.
+BEV_CALIB_EXPORT int32_t bev_calib_board_corner_count(BevCalibSession *s, int32_t board);
+BEV_CALIB_EXPORT int32_t bev_calib_board_corner(BevCalibSession *s, int32_t board, int32_t corner,
+                                                double *x, double *y);
+// Writes the board as printed, width px wide, marker ids on it and corner
+// (-1 for none) marked, as a PNG. Sheet metres map to its pixels as
+// px = (sheet + *margin_m) * *px_per_m.
+BEV_CALIB_EXPORT int32_t bev_calib_board_reference(BevCalibSession *s, int32_t board, int32_t corner,
+                                                   int32_t width, const char *png_path,
+                                                   double *margin_m, double *px_per_m);
+
+// Recomputes the seams between solved cameras; then read them by index.
+BEV_CALIB_EXPORT int32_t bev_calib_seam_count(BevCalibSession *s);
+BEV_CALIB_EXPORT int32_t bev_calib_seam(BevCalibSession *s, int32_t index, BevCalibSeam *out);
+
+BEV_CALIB_EXPORT int32_t bev_calib_render_preview(BevCalibSession *s, double px_per_m, const char *path);
+
+// Loads config_path (defaults if missing), writes every solved camera's
+// homography into its slot, and saves it back.
+BEV_CALIB_EXPORT int32_t bev_calib_save_config(BevCalibSession *s, const char *config_path);
+
+// ── Lens (intrinsic) calibration ─────────────────────────────────────────────
+
+typedef struct BevCalibIntrinsics BevCalibIntrinsics;
+
+typedef struct BevIntrStatus {
+    int32_t corners, usable, views;
+    int32_t width, height;
+    int32_t markers, id_min, id_max;   // markers of the dictionary seen, any board
+    double center_x, center_y;         // the corners' centre, fraction of the frame
+    double extent;                     // their bounding box diagonal, fraction of the frame's
+} BevIntrStatus;
+
+typedef struct BevIntrResult {
+    int32_t ok, image_w, image_h, views;
+    double rms_px, worst_view_px;
+    double fx, fy, cx, cy;
+    double k1, k2, p1, p2, k3;
+    int32_t fisheye;
+    double k4;                  // fisheye only, which has no p1/p2
+} BevIntrResult;
+
+// Streams that camera at full resolution until closed. fisheye selects
+// cv::fisheye's model over the pinhole one.
+BEV_CALIB_EXPORT BevCalibIntrinsics *bev_intr_open(const char *camera_id, const char *dict,
+                                                   int32_t squares_x, int32_t squares_y,
+                                                   double square_len, double marker_len, int32_t legacy,
+                                                   int32_t fisheye);
+BEV_CALIB_EXPORT void bev_intr_close(BevCalibIntrinsics *h);
+
+// Grabs the newest frame, detects the board, and writes a JPEG of it scaled
+// to preview_width with the detection and every kept view's corners drawn.
+BEV_CALIB_EXPORT int32_t bev_intr_grab(BevCalibIntrinsics *h, const char *preview_path,
+                                       int32_t preview_width, BevIntrStatus *out);
+// Keeps the last grab as a view. Returns the view count, or -1 if unusable.
+BEV_CALIB_EXPORT int32_t bev_intr_add(BevCalibIntrinsics *h);
+// Writes the full frame of the view kept last (PNG by the extension).
+BEV_CALIB_EXPORT int32_t bev_intr_save_kept(BevCalibIntrinsics *h, const char *path);
+BEV_CALIB_EXPORT int32_t bev_intr_calibrate(BevCalibIntrinsics *h, BevIntrResult *out);
+// Writes the last calibrate() result in the <lens>-lens.ini format.
+BEV_CALIB_EXPORT int32_t bev_intr_save(BevCalibIntrinsics *h, const char *lens_ini_path);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // BEV_CALIB_API_H_

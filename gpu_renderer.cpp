@@ -237,11 +237,12 @@ uniform float uFacingDeg[MAX_CAMERAS];
 // from). fx/fy/cx/cy (uDist0) are pre-normalized by the CPU caller into
 // [0,1] uv terms -- not raw pixel values. k1/k2/k3 (radial, uDist1.xyz) and
 // p1/p2 (tangential, uDist1.w/uDist2.x) follow the standard OpenCV
-// distortion-model convention. uDist2.y > 0.5 gates the correction on;
-// default (0) skips it entirely, reproducing today's undistorted behavior.
+// distortion-model convention. uDist2.y is the lens mode: 0 skips the
+// correction, 1 is that pinhole model, 2 is cv::fisheye with k1..k4 in
+// uDist1.
 uniform vec4  uDist0[MAX_CAMERAS]; // fx, fy, cx, cy
-uniform vec4  uDist1[MAX_CAMERAS]; // k1, k2, k3, p1
-uniform vec2  uDist2[MAX_CAMERAS]; // p2, hasDistortion
+uniform vec4  uDist1[MAX_CAMERAS]; // k1, k2, k3, p1 (k4 for fisheye)
+uniform vec2  uDist2[MAX_CAMERAS]; // p2, lens mode
 uniform int   uNumCameras;
 
 // BEV canvas size in pixels (matches the FBO/render size; set once at
@@ -252,6 +253,7 @@ uniform float uBevHeight;
 // canvas), already baked into uH[]; kept as a uniform so the blend math
 // below (which recovers world-space X/Y from gl_FragCoord) stays in sync.
 uniform float uPxPerM;
+uniform vec2 uViewCenter;
 
 // Angular half-width, degrees, of the blend zone centered on each camera's
 // facing bearing. Needs to be at least half the largest gap between
@@ -294,7 +296,16 @@ const float kPi = 3.14159265358979;
     if (IDX < uNumCameras) {                                                 \
         vec3 s  = uH[IDX] * p;                                              \
         vec2 uv = s.xy / s.z;                                               \
-        if (uDist2[IDX].y > 0.5) {                                          \
+        if (uDist2[IDX].y > 1.5) {                                          \
+            vec4 d0 = uDist0[IDX]; vec4 d1 = uDist1[IDX];                   \
+            float x = (uv.x - d0.z) / d0.x;                                \
+            float y = (uv.y - d0.w) / d0.y;                                \
+            float r = sqrt(x*x + y*y);                                     \
+            float th = atan(r), t2 = th*th;                                \
+            float thd = th*(1.0 + t2*(d1.x + t2*(d1.y + t2*(d1.z + t2*d1.w))));\
+            float k = r > 1e-8 ? thd / r : 1.0;                            \
+            uv = vec2(d0.x*x*k + d0.z, d0.y*y*k + d0.w);                   \
+        } else if (uDist2[IDX].y > 0.5) {                                   \
             vec4 d0 = uDist0[IDX]; vec4 d1 = uDist1[IDX];                   \
             float p2v = uDist2[IDX].x;                                     \
             float x = (uv.x - d0.z) / d0.x;                                \
@@ -354,8 +365,8 @@ void main() {
 
     // This fragment's bearing relative to the BEV canvas center — used only
     // for blend weighting, not for the per-camera homography lookup above.
-    float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM;
-    float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM;
+    float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM + uViewCenter.x;
+    float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM + uViewCenter.y;
     float thetaFrag = atan(worldY, worldX);
 
     vec3  colorSum  = vec3(0.0);
@@ -406,6 +417,7 @@ uniform int   uNumCameras;
 uniform float uBevWidth;
 uniform float uBevHeight;
 uniform float uPxPerM;
+uniform vec2 uViewCenter;
 
 uniform float uOverlap;
 uniform float uBlendEdge;
@@ -420,7 +432,16 @@ const float kPi = 3.14159265358979;
     if (IDX < uNumCameras) {                                                 \
         vec3 s  = uH[IDX] * p;                                              \
         vec2 uv = s.xy / s.z;                                               \
-        if (uDist2[IDX].y > 0.5) {                                          \
+        if (uDist2[IDX].y > 1.5) {                                          \
+            vec4 d0 = uDist0[IDX]; vec4 d1 = uDist1[IDX];                   \
+            float x = (uv.x - d0.z) / d0.x;                                \
+            float y = (uv.y - d0.w) / d0.y;                                \
+            float r = sqrt(x*x + y*y);                                     \
+            float th = atan(r), t2 = th*th;                                \
+            float thd = th*(1.0 + t2*(d1.x + t2*(d1.y + t2*(d1.z + t2*d1.w))));\
+            float k = r > 1e-8 ? thd / r : 1.0;                            \
+            uv = vec2(d0.x*x*k + d0.z, d0.y*y*k + d0.w);                   \
+        } else if (uDist2[IDX].y > 0.5) {                                   \
             vec4 d0 = uDist0[IDX]; vec4 d1 = uDist1[IDX];                   \
             float p2v = uDist2[IDX].x;                                     \
             float x = (uv.x - d0.z) / d0.x;                                \
@@ -458,8 +479,8 @@ const float kPi = 3.14159265358979;
 void main() {
     vec3 p = vec3(gl_FragCoord.x, uBevHeight - gl_FragCoord.y, 1.0);
 
-    float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM;
-    float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM;
+    float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM + uViewCenter.x;
+    float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM + uViewCenter.y;
     float thetaFrag = atan(worldY, worldX);
 
     vec3  colorSum  = vec3(0.0);
@@ -567,12 +588,13 @@ uniform float uFacingDeg;
 // (see that shader's comment), just non-array since this program draws one
 // camera at a time.
 uniform vec4  uDist0; // fx, fy, cx, cy
-uniform vec4  uDist1; // k1, k2, k3, p1
-uniform vec2  uDist2; // p2, hasDistortion
+uniform vec4  uDist1; // k1, k2, k3, p1 (k4 for fisheye)
+uniform vec2  uDist2; // p2, lens mode
 
 uniform float uBevWidth;
 uniform float uBevHeight;
 uniform float uPxPerM;
+uniform vec2 uViewCenter;
 uniform float uOverlap;     // angular half-width, degrees (kFS_MULTI's meaning)
 uniform float uBlendEdge;
 uniform float uFreeYaw;     // same testing escape hatch as kFS_MULTI's uFreeYaw
@@ -586,7 +608,15 @@ void main() {
     vec3 s = uH * p;
     vec2 uv = s.xy / s.z;
 
-    if (uDist2.y > 0.5) {
+    if (uDist2.y > 1.5) {
+        float x = (uv.x - uDist0.z) / uDist0.x;
+        float y = (uv.y - uDist0.w) / uDist0.y;
+        float r = sqrt(x*x + y*y);
+        float th = atan(r), t2 = th*th;
+        float thd = th*(1.0 + t2*(uDist1.x + t2*(uDist1.y + t2*(uDist1.z + t2*uDist1.w))));
+        float k = r > 1e-8 ? thd / r : 1.0;
+        uv = vec2(uDist0.x*x*k + uDist0.z, uDist0.y*y*k + uDist0.w);
+    } else if (uDist2.y > 0.5) {
         float x = (uv.x - uDist0.z) / uDist0.x;
         float y = (uv.y - uDist0.w) / uDist0.y;
         float r2 = x*x + y*y;
@@ -607,8 +637,8 @@ void main() {
     if (uFreeYaw > 0.5) {
         w = 1.0;
     } else {
-        float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM;
-        float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM;
+        float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM + uViewCenter.x;
+        float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM + uViewCenter.y;
         float thetaFrag = atan(worldY, worldX);
 
         float d   = mod(thetaFrag - radians(uFacingDeg) + kPi, 2.0 * kPi) - kPi;
@@ -942,6 +972,64 @@ bool GpuRenderer::load_ext_fns()
     return true;
 }
 
+uint32_t GpuRenderer::drm_fourcc(const PixelFormat &format)
+{
+    if (format == formats::NV12) return DRM_FORMAT_NV12;
+    if (format == formats::YUYV) return DRM_FORMAT_YUYV;
+    if (format == formats::UYVY) return DRM_FORMAT_UYVY;
+    return 0;
+}
+
+EGLImageKHR GpuRenderer::create_egl_image(const FrameBuffer *buf, const Import &import)
+{
+    if (import.fourcc == 0 || import.fourcc == DRM_FORMAT_NV12) {
+        if (import.w == 0) return create_egl_image(buf);
+        const auto &planes = buf->planes();
+        const EGLint attrs[] = {
+            EGL_WIDTH,                      import.w,
+            EGL_HEIGHT,                     import.h,
+            EGL_LINUX_DRM_FOURCC_EXT,       DRM_FORMAT_NV12,
+            EGL_DMA_BUF_PLANE0_FD_EXT,      planes[0].fd.get(),
+            EGL_DMA_BUF_PLANE0_OFFSET_EXT,  (EGLint)planes[0].offset,
+            EGL_DMA_BUF_PLANE0_PITCH_EXT,   import.stride,
+            EGL_DMA_BUF_PLANE1_FD_EXT,      planes[1].fd.get(),
+            EGL_DMA_BUF_PLANE1_OFFSET_EXT,  (EGLint)planes[1].offset,
+            EGL_DMA_BUF_PLANE1_PITCH_EXT,   import.stride,
+            EGL_NONE,
+        };
+        return pfn_CreateImage(egl_->dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attrs);
+    }
+    // Packed 4:2:2, one plane; sampled through samplerExternalOES like NV12.
+    const auto &planes = buf->planes();
+    const EGLint attrs[] = {
+        EGL_WIDTH,                      import.w,
+        EGL_HEIGHT,                     import.h,
+        EGL_LINUX_DRM_FOURCC_EXT,       (EGLint)import.fourcc,
+        EGL_DMA_BUF_PLANE0_FD_EXT,      planes[0].fd.get(),
+        EGL_DMA_BUF_PLANE0_OFFSET_EXT,  (EGLint)planes[0].offset,
+        EGL_DMA_BUF_PLANE0_PITCH_EXT,   import.stride,
+        EGL_NONE,
+    };
+    return pfn_CreateImage(egl_->dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, nullptr, attrs);
+}
+
+bool GpuRenderer::set_live_import(int slot, const Import &import, const FrameBuffer *buf)
+{
+    if (slot < 0 || slot >= num_cameras_multi_) return false;
+    if ((int)live_imports_.size() < num_cameras_multi_) live_imports_.resize(num_cameras_multi_);
+    live_imports_[slot] = import;
+    const int fd = buf->planes()[0].fd.get();
+    if (fd_cache_.count(fd)) return true;
+    EGLImageKHR img = create_egl_image(buf, import);
+    if (img == EGL_NO_IMAGE_KHR) {
+        std::cerr << "[gpu] slot " << slot << ": dma-buf import refused (0x" << std::hex << eglGetError()
+                  << std::dec << ")\n";
+        return false;
+    }
+    cache_frame(fd, img);
+    return true;
+}
+
 EGLImageKHR GpuRenderer::create_egl_image(const FrameBuffer *buf)
 {
     const auto &planes = buf->planes();
@@ -1156,7 +1244,7 @@ bool GpuRenderer::init(const EGLState &egl,
     for (const auto &buf : buffers) {
         int fd = buf->planes()[0].fd.get();
 
-        EGLImageKHR img = create_egl_image(buf.get());
+        EGLImageKHR img = create_egl_image(buf.get(), import_);
         if (img == EGL_NO_IMAGE_KHR) {
             std::cerr << "[gpu] eglCreateImageKHR failed for fd=" << fd
                       << " (0x" << std::hex << eglGetError() << std::dec << ")\n";
@@ -1343,8 +1431,8 @@ void GpuRenderer::set_px_per_m(float v)
         // 1 NDC unit spans W_/2 (or H_/2) pixels, so offset_m * v pixels
         // becomes offset_m * v / (W_/2) NDC, i.e. * 2 / W_.
         glUniform2f(glGetUniformLocation(prog_car_, "uCenter"),
-                    car_center_x_m_ * v * 2.0f / (float)W_,
-                    car_center_y_m_ * v * 2.0f / (float)H_);
+                    (car_center_x_m_ - view_cx_m_) * v * 2.0f / (float)W_,
+                    (car_center_y_m_ - view_cy_m_) * v * 2.0f / (float)H_);
     }
 }
 
@@ -1357,8 +1445,20 @@ void GpuRenderer::set_car_center(float center_x_m, float center_y_m)
     // Same conversion set_px_per_m() uses, just off the cached px_per_m_
     // rather than a freshly-passed value, since px_per_m isn't changing here.
     glUniform2f(glGetUniformLocation(prog_car_, "uCenter"),
-                car_center_x_m_ * px_per_m_ * 2.0f / (float)W_,
-                car_center_y_m_ * px_per_m_ * 2.0f / (float)H_);
+                (car_center_x_m_ - view_cx_m_) * px_per_m_ * 2.0f / (float)W_,
+                (car_center_y_m_ - view_cy_m_) * px_per_m_ * 2.0f / (float)H_);
+}
+
+void GpuRenderer::set_view_center(float x_m, float y_m)
+{
+    view_cx_m_ = x_m;
+    view_cy_m_ = y_m;
+    for (GLuint prog : {prog_multi_, prog_pyr_warp_}) {
+        if (!prog) continue;
+        glUseProgram(prog);
+        glUniform2f(glGetUniformLocation(prog, "uViewCenter"), x_m, y_m);
+    }
+    set_px_per_m(px_per_m_);
 }
 
 void GpuRenderer::render_frame(const DmaBufFrame &left, const DmaBufFrame &right)
@@ -1530,7 +1630,7 @@ void GpuRenderer::set_ipm_multi(int slot, const float H[9], float facing_deg)
     glUniform1f(u_facing_multi_[slot], facing_deg);
 }
 
-void GpuRenderer::set_distortion_multi(int slot, bool has_distortion,
+void GpuRenderer::set_distortion_multi(int slot, int lens_mode,
                                        float fx, float fy, float cx, float cy,
                                        float k1, float k2, float k3, float p1, float p2)
 {
@@ -1538,7 +1638,7 @@ void GpuRenderer::set_distortion_multi(int slot, bool has_distortion,
     glUseProgram(prog_multi_);
     glUniform4f(u_dist0_multi_[slot], fx, fy, cx, cy);
     glUniform4f(u_dist1_multi_[slot], k1, k2, k3, p1);
-    glUniform2f(u_dist2_multi_[slot], p2, has_distortion ? 1.0f : 0.0f);
+    glUniform2f(u_dist2_multi_[slot], p2, (float)lens_mode);
 }
 
 bool GpuRenderer::init_car_icon(const char *png_path, float width_m, float length_m,
@@ -1606,7 +1706,8 @@ void GpuRenderer::render_frame_multi_live(const std::vector<const libcamera::Fra
         int fd = bufs[i]->planes()[0].fd.get();
         auto it = fd_cache_.find(fd);
         if (it == fd_cache_.end()) {
-            EGLImageKHR img = create_egl_image(bufs[i]);
+            EGLImageKHR img = i < (int)live_imports_.size() ? create_egl_image(bufs[i], live_imports_[i])
+                                                            : create_egl_image(bufs[i]);
             if (img == EGL_NO_IMAGE_KHR) {
                 std::cerr << "[gpu] eglCreateImageKHR failed for fd=" << fd
                           << " (0x" << std::hex << eglGetError() << std::dec << ")\n";
@@ -1798,7 +1899,7 @@ void GpuRenderer::set_ipm_multi_pyramid(int slot, const float H[9], float facing
     facing_pyr_[slot] = facing_deg;
 }
 
-void GpuRenderer::set_distortion_multi_pyramid(int slot, bool has_distortion,
+void GpuRenderer::set_distortion_multi_pyramid(int slot, int lens_mode,
                                                float fx, float fy, float cx, float cy,
                                                float k1, float k2, float k3, float p1, float p2)
 {
@@ -1810,7 +1911,7 @@ void GpuRenderer::set_distortion_multi_pyramid(int slot, bool has_distortion,
     dist1_pyr_[slot][0] = k1; dist1_pyr_[slot][1] = k2;
     dist1_pyr_[slot][2] = k3; dist1_pyr_[slot][3] = p1;
     dist2_pyr_[slot][0] = p2;
-    dist2_pyr_[slot][1] = has_distortion ? 1.0f : 0.0f;
+    dist2_pyr_[slot][1] = (float)lens_mode;
 }
 
 void GpuRenderer::render_frame_multi_pyramid(const std::vector<DmaBufFrame> &frames)

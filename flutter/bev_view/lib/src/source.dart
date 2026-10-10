@@ -31,6 +31,7 @@ sealed class BevSource {
 final class BevCameraSource extends BevSource {
   const BevCameraSource({
     this.index = 0,
+    this.cameraId,
     this.width,
     this.height,
     this.fps,
@@ -38,6 +39,9 @@ final class BevCameraSource extends BevSource {
   });
 
   final int index;
+
+  /// libcamera's id for the camera (Camera::id()); wins over [index].
+  final String? cameraId;
 
   /// Requested stream size; libcamera may adjust it. Default 1640x1232.
   final int? width;
@@ -57,7 +61,7 @@ final class BevCameraSource extends BevSource {
   @override
   List<MapEntry<String, String>> toParams() => [
     const MapEntry('mode', 'camera'),
-    MapEntry('camera_index', '$index'),
+    if (cameraId != null) MapEntry('camera_id', cameraId!) else MapEntry('camera_index', '$index'),
     if (width != null) MapEntry('width', '$width'),
     if (height != null) MapEntry('height', '$height'),
     if (fps != null) MapEntry('camera_fps', '$fps'),
@@ -125,6 +129,7 @@ final class BevSurroundSource extends BevSource {
   /// Sources in config-slot order, as repeated `--src`.
   const BevSurroundSource(
     List<String> this.sources, {
+    this.undistort,
     this.config = 'bev_config.ini',
     this.lensDir,
     this.blend = BevBlend.feather,
@@ -153,9 +158,15 @@ final class BevSurroundSource extends BevSource {
     this.fps,
     this.width,
     this.height,
-  }) : sources = null;
+  }) : sources = null, undistort = null;
 
   final List<String>? sources;
+
+  /// One camera seen straight on instead of on the ground: its lens
+  /// distortion removed and zoomed out by this factor (1 = the camera's own
+  /// field, below 1 wider, as a fisheye needs). Needs no surround
+  /// calibration.
+  final double? undistort;
   final String? forwardLeft;
   final String? forwardRight;
   final String? backwardLeft;
@@ -180,6 +191,7 @@ final class BevSurroundSource extends BevSource {
   @override
   List<MapEntry<String, String>> toParams() => [
     const MapEntry('mode', 'surround'),
+    if (undistort != null) MapEntry('undistort', '$undistort'),
     if (fps != null) MapEntry('camera_fps', '$fps'),
     if (width != null) MapEntry('width', '$width'),
     if (height != null) MapEntry('height', '$height'),

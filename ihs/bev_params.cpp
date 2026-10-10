@@ -106,6 +106,10 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
                 return bad("an integer in 2..6");
         } else if (key == "scanout") {
             if (!to_bool(val, out.scanout)) return bad("a boolean");
+        } else if (key == "packed_zero_copy") {
+            if (!to_bool(val, out.packed_zero_copy)) return bad("a boolean");
+        } else if (key == "camera_id") {
+            out.camera_id = val;
         } else if (key == "camera_index") {
             if (!to_int(val, out.camera_index) || out.camera_index < 0) return bad("a camera index");
         } else if (key == "width") {
@@ -146,6 +150,8 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
             out.config_path = resolve_path(val, assets_dir);
         } else if (key == "lens_dir") {
             out.lens_dir = resolve_path(val, assets_dir);
+        } else if (key == "undistort") {
+            if (!to_double(val, out.undistort) || out.undistort < 0.0) return bad("a zoom, 0 = off");
         } else if (key == "blend") {
             if (val != "feather" && val != "pyramid" && val != "coverage")
                 return bad("feather|pyramid|coverage");

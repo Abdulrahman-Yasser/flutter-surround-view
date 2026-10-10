@@ -1,5 +1,6 @@
 build/
 build-native/
+build-agl-sdk/
 libcamera-dmabuf-capture
 *.raw
 README.md
@@ -7,7 +8,7 @@ README.md
 README.md
 *.md
 !flutter/**/*.md
-scripts/__pycache__/calibrate_intrinsics.cpython-310.pyc
+scripts/__pycache__/*
 extern/
 
 # JetBrains project files
@@ -18,3 +19,4 @@ compile_commands.json
 flutter-surround-view/.dart_tool/
 flutter-surround-view/linux/
 flutter-surround-view/libapp.so.*
+scripts/__pycache__/make_boards.cpython-310.pyc

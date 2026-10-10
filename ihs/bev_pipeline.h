@@ -12,6 +12,7 @@
 #include "bev_params.h"
 #include "capture_session.h"
 #include "egl_context.h"
+#include "cpu_frames.h"
 #include "file_source.h"
 #include "gpu_renderer.h"
 
@@ -69,6 +70,7 @@ private:
         std::vector<std::unique_ptr<libcamera::Request>> requests;
         libcamera::Stream                               *stream = nullptr;
         std::unique_ptr<CaptureSession>                  session;
+        std::unique_ptr<CpuFrames>                       cpu; // set when frames go through the CPU
         bool                                             acquired = false;
         bool                                             started  = false;
     };
@@ -82,7 +84,7 @@ private:
     bool render_file();
     bool render_surround();
     bool render_surround_live();
-    bool open_live_slot(Slot &slot, int index);
+    bool open_live_slot(Slot &slot, std::shared_ptr<libcamera::Camera> camera);
     bool start_live_cameras();
     void stop_live_cameras();
     void release_live_slots();
@@ -110,6 +112,8 @@ private:
     bool                                                camera_started_  = false;
     std::mutex                                          session_mutex_;
     std::unique_ptr<CaptureSession>                     session_;
+    // Set for a camera the GPU can't import (a USB camera's YUYV).
+    std::unique_ptr<CpuFrames>                          camera_cpu_;
 
     // File mode.
     std::unique_ptr<FileSource> file_src_;
@@ -118,12 +122,26 @@ private:
     // Surround mode.
     std::vector<Slot>        slots_;
     std::vector<DmaBufFrame> frames_;
+    bool                     cpu_live_ = false;
     bool                     pyramid_ = false;
     bool                     live_    = false;
 
     std::vector<CaptureSession *>                 live_sessions_;
     std::vector<const libcamera::FrameBuffer *>   live_bufs_;
     std::vector<libcamera::Request *>             live_reqs_;
+
+    // Zero-copy frames are sampled by the GPU straight from the camera's
+    // buffers, so a buffer goes back to the camera only once the draw that
+    // read it has finished; else the next capture is written into it while
+    // the GPU still reads it, which tears whatever moves.
+    struct Held {
+        libcamera::Request *req = nullptr;
+        GLsync              fence = nullptr;
+    };
+    void hold(Held &held, libcamera::Camera &camera, libcamera::Request *req, GLsync fence);
+    void drop_held();
+    Held              held_camera_;
+    std::vector<Held> held_live_;
 
     // Pattern mode. The motion is a function of elapsed time, not of the frame
     // counter: tying it to frames makes every hitch and every change of frame

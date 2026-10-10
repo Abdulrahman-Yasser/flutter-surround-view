@@ -89,6 +89,10 @@ BEV_EXPORT void bev_view_set_car_center(int64_t view_id, double x_m, double y_m)
 // Queue a PNG snapshot of the pipeline output to @path. Returns 1 if queued.
 BEV_EXPORT int32_t bev_view_snapshot(int64_t view_id, const char *path);
 
+// 1 while any view holds the process's libcamera camera manager. Only one may
+// exist per process, so libbev_calib.so waits for this to drop to 0.
+BEV_EXPORT int32_t bev_camera_manager_active(void);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

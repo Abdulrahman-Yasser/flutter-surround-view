@@ -6,10 +6,10 @@
 
 // On-disk defaults for the --src multi-camera BEV path: per-slot starting
 // pose (mirrors main.cpp's SlotParams) plus an optional measured ChArUco
-// board->image homography for that slot, and the global blend/scale
+// car-frame->image homography for that slot, and the global blend/scale
 // tunables. Lets camera-rig geometry and calibration survive across runs
-// (and rebuilds) without editing source, and be overwritten from live-tuned
-// values at runtime via bev_config_save().
+// (and rebuilds) without editing source. Written by the calibration library
+// (calib/) and by 'W' at runtime via bev_config_save().
 struct BevSlotConfig {
     double cam_x = 0.0, cam_y = 0.0, cam_h = 1.2, pitch = -30.0, yaw = 0.0;
     // Canvas coverage-wedge center, degrees (world atan2(Y,X) bearing: front
@@ -24,17 +24,19 @@ struct BevSlotConfig {
     // bev_config_load().
     double facing_deg = 90.0; // default: front
     bool   has_hb2i = false;
-    mat3   hb2i; // board-metre -> image-pixel; valid only if has_hb2i
+    mat3   hb2i; // car-frame metres -> undistorted image pixels; valid only if has_hb2i
+    // The image size hb2i's pixels are in (the calibration still's), so it
+    // can be normalized for whatever resolution the cameras stream at.
+    int    hb2i_w = 0, hb2i_h = 0;
+    // Car-frame box (metres) of the ground this camera was calibrated on:
+    // its boards out to the car body. The live view frames the union of its
+    // cameras' boxes instead of using px_per_m.
+    bool   has_view = false;
+    double view_x0 = 0, view_y0 = 0, view_x1 = 0, view_y1 = 0;
 
-    // Live-tuned (X/x, G/g, Y/y) offset from cam_x/cam_y/yaw above, for a
-    // has_hb2i slot -- see main.cpp's measured_H() comment. cam_x/cam_y/yaw
-    // stay the fixed pose the ChArUco shot was taken at (never overwritten by
-    // 'W' save) so the delta these three store is exactly the correction
-    // main.cpp needs to reproduce; if 'W' instead overwrote cam_x/cam_y/yaw
-    // directly, the delta would recompute to 0 on the next load and silently
-    // discard whatever offset had been tuned in, even though the raw numbers
-    // still landed correctly in the file.
-    double cam_x_delta = 0.0, cam_y_delta = 0.0, yaw_delta = 0.0;
+    // libcamera's id for the camera mounted here (Camera::id(), stable across
+    // boots and plug order); empty = no camera assigned to this position.
+    std::string camera;
 
     // Which lens this slot uses, looked up by naming convention as
     // "<lens_dir>/<lens_model>-lens.ini" (see lens_calib_load() and
@@ -51,24 +53,38 @@ struct BevSlotConfig {
     // has_distortion is true. fx/fy/cx/cy are in pixel units at
     // lens_calib_w x lens_calib_h (the resolution they were measured at --
     // main.cpp rescales+normalizes them for whatever resolution the actual
-    // video turns out to be, same idea as measured_H()'s CAL_W/CAL_H
-    // rescale for hb2i). k1/k2/k3 (radial) and p1/p2 (tangential) follow the
+    // video turns out to be, same idea as hb2i_w/hb2i_h). k1/k2/k3 (radial) and p1/p2 (tangential) follow the
     // standard OpenCV distortion-model convention, matching
     // scripts/calibrate_intrinsics.py's own dist-coefficient ordering.
+    // A fisheye lens file ("model = fisheye") uses OpenCV's cv::fisheye
+    // model instead: k1..k4 on the ray angle, p1/p2 unused.
     double fx = 0.0, fy = 0.0, cx = 0.0, cy = 0.0;
-    double k1 = 0.0, k2 = 0.0, k3 = 0.0, p1 = 0.0, p2 = 0.0;
+    double k1 = 0.0, k2 = 0.0, k3 = 0.0, k4 = 0.0, p1 = 0.0, p2 = 0.0;
+    bool   fisheye = false;
     int    lens_calib_w = 0, lens_calib_h = 0;
     bool   has_distortion = false;
 };
 
+// Where a camera is mounted on the car. BevConfig::slots is indexed by these,
+// and bev_config.ini names its sections after them ([front_left] ...). The
+// first four keep the indices of the old [slot0]..[slot3] sections and the
+// forward_*/backward_* file sources, which still load as those positions.
+enum BevPosition {
+    kFrontLeft, kFrontRight, kBackLeft, kBackRight, kFront, kRight, kBack, kLeft, kPositionCount
+};
+
+const char *bev_position_name(int position);         // "front_left"; nullptr out of range
+int bev_position_index(const std::string &name);     // -1 if unknown
+double bev_position_facing(int position);            // default facing_deg for that position
+
 struct BevConfig {
-    static constexpr int kMaxSlots = 4;
+    static constexpr int kMaxSlots = kPositionCount;
     // Ground-sampling density: canvas width in px / px_per_m = real-world
     // meters spanned by the BEV output. Needs rechecking any time the
-    // Hb2i matrices or CAL_W/CAL_H (main.cpp) change -- the old 4000, tuned
+    // Hb2i matrices change -- the old 4000, tuned
     // for a previous calibration, made each camera sample only a sliver of
     // its own frame (camA u=[0.71,1.0], camB u=[0.0,0.41]) stretched across
-    // most of the canvas once the new Hb2i/CAL_W/CAL_H took over (the
+    // most of the canvas once the new Hb2i took over (the
     // "both videos on the right" symptom). 2200 was confirmed (coverage-map
     // scan of the current kHb2i_A/kHb2i_B at 1640x1232) as the smallest
     // value giving 100% canvas coverage with no black gaps, while each
@@ -129,9 +145,9 @@ bool bev_config_load(const std::string &path, BevConfig &out);
 bool bev_config_save(const std::string &path, const BevConfig &cfg);
 
 // Parses a flat key=value lens/intrinsics file (fx, fy, cx, cy, calib_w,
-// calib_h required; k1, k2, k3, p1, p2 optional, default 0.0 -- a
+// calib_h required; k1, k2, k3, k4, p1, p2 optional, default 0.0 -- a
 // --zero-tangent-dist or non-rational-model calibration legitimately has
-// some of these at zero). On success, sets slot's fx/fy/cx/cy/k1../
+// some of these at zero; model = pinhole|fisheye, default pinhole). On success, sets slot's fx/fy/cx/cy/k1../
 // lens_calib_w/h and has_distortion=true; slot is left untouched otherwise.
 // Returns false, with no message printed, if path doesn't exist (the
 // expected/common state before a lens is calibrated -- the caller decides
@@ -140,3 +156,7 @@ bool bev_config_save(const std::string &path, const BevConfig &cfg);
 // (missing required key, bad number) -- that case is a real bug worth
 // surfacing, unlike a simply-absent file.
 bool lens_calib_load(const std::string &path, BevSlotConfig &slot);
+
+// Accepts a cardinal keyword (front/back/left/right, case-insensitive) or a
+// raw degree number -- same bearing convention as BevSlotConfig::facing_deg.
+bool parse_facing(const std::string &val, double &out);

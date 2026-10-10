@@ -1,0 +1,106 @@
+#pragma once
+
+#include "calib_layout.h"
+
+#include <opencv2/core.hpp>
+
+#include <memory>
+#include <string>
+#include <vector>
+
+struct BevConfig;
+class CharucoModel;
+
+struct CalibPoint {
+    int         board = 0;       // index into CalibLayout::boards
+    int         corner = 0;      // ChArUco corner id, or 0..3 clockwise from top-left on a square
+    cv::Point2f image;           // raw (distorted) frame pixel, what the user drags
+    cv::Point2d world;           // car frame, metres
+    bool        moved = false;   // edited by hand after detection
+    bool        inlier = false;  // survived the last solve's RANSAC
+    bool        guessed = false; // a square corner the detector missed, placed where it should be;
+                                 // left out of the solve until the user moves it
+};
+
+struct CalibSolve {
+    bool        ok = false;
+    cv::Matx33d hb2i;            // car metres -> undistorted pixels at the image's own size
+    int         inliers = 0;
+    double      rms_px = 0, max_px = 0;            // reprojection over inliers, raw pixels
+    double      ground_rms_mm = 0, ground_max_mm = 0;
+};
+
+struct CalibSeam {
+    int    cam_a = 0, cam_b = 0; // indices into CalibLayout::cameras
+    int    shared = 0;           // corners that are inliers in both cameras
+    double median_mm = 0, max_mm = 0;
+};
+
+// One calibration run over a layout. Cameras are addressed by their index in
+// CalibLayout::cameras, not by slot. The constructor throws
+// std::runtime_error on a layout OpenCV can't build or a malformed lens file;
+// a camera whose lens file doesn't exist yet is solved without undistortion.
+class CalibSession {
+public:
+    CalibSession(const CalibLayout &layout, const std::string &lens_dir);
+    ~CalibSession();
+
+    const CalibLayout &layout() const { return layout_; }
+    int cameras() const { return (int)layout_.cameras.size(); }
+
+    bool has_lens(int cam) const;
+    // Switches cam to "<lens_dir>/<lens>-lens.ini" (empty: none), which is
+    // also the lens_model apply() writes. Throws on a malformed file.
+    void set_lens(int cam, const std::string &lens_dir, const std::string &lens);
+
+    void set_image(int cam, const cv::Mat &bgr);
+    const cv::Mat &image(int cam) const;
+
+    // Replaces cam's points with a fresh detection; returns how many corners.
+    // Squares are searched where the ChArUco corners found here put them.
+    int detect(int cam);
+    const std::vector<CalibPoint> &points(int cam) const;
+    void move_point(int cam, int idx, cv::Point2f image_px);
+    // Adds every corner of every board that wasn't detected but lies in the
+    // frame, where the fit so far predicts it, as a guessed point. Needs at
+    // least 4 corners; returns how many were added, or -1.
+    int add_missing(int cam);
+    // Puts board corner `corner` at image_px, by hand: moves its point if it
+    // has one, else adds it. Returns the point's index.
+    int place(int cam, int board, int corner, cv::Point2f image_px);
+
+    // A board's corners in printed-sheet metres (origin top-left, +y down),
+    // indexed by corner id; a square's are its 4 corners clockwise from
+    // top-left.
+    const std::vector<cv::Point2d> &sheet_corners(int board) const { return sheet_.at(board); }
+    // The board as printed, `width` px wide with a white margin, marker ids
+    // written on and corner (if >= 0) marked. margin_m and px_per_m map
+    // sheet metres to its pixels: px = (sheet + margin_m) * px_per_m.
+    cv::Mat board_reference(int board, int corner, int width, double &margin_m, double &px_per_m) const;
+
+    bool solve(int cam);
+    const CalibSolve &result(int cam) const;
+    std::vector<CalibSeam> seams() const;
+
+    // Stitched top view of every solved camera, +Y up, framing all boards.
+    cv::Mat render_preview(double px_per_m) const;
+
+    // Writes every solved camera's homography into its slot, plus the car
+    // size the layout was measured against.
+    void apply(BevConfig &cfg) const;
+
+private:
+    struct Cam;
+
+    bool fit(int cam, cv::Matx33d &H, std::vector<bool> &inlier) const;
+    bool find_charuco(int cam, int board, const cv::Matx33d &H, std::vector<cv::Point2f> &corners,
+                      std::vector<int> &ids) const;
+    bool find_square(int cam, int board, const cv::Matx33d &H, std::vector<cv::Point2f> &corners,
+                     bool &found) const;
+
+    CalibLayout layout_;
+    std::vector<std::unique_ptr<CharucoModel>> boards_;
+    std::vector<std::vector<cv::Point2d>> world_; // per board, per corner id: car frame
+    std::vector<std::vector<cv::Point2d>> sheet_; // the same corners on the printed sheet
+    std::vector<Cam> cams_;
+};

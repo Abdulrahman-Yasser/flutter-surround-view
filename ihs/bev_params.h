@@ -12,9 +12,11 @@
 //   ring_size   2..6 dma-bufs per view               (default 4)
 //   scanout     1 = take a KMS plane when the shell offers one (EGL DRM only)
 //
-//   camera:   camera_index, width, height, tuning_file
+//   camera:   camera_id (libcamera's id) or camera_index, width, height,
+//             tuning_file
 //   file:     file, bev, cam_h, pitch, yaw, cam_y, px_per_m
-//   surround: src (repeatable) | forward_left, forward_right, backward_left,
+//   surround: src (repeatable: a file, camera:<index> or position:<name>, the
+//             camera bev_config.ini mounts there) | forward_left, forward_right, backward_left,
 //             backward_right; config, lens_dir, blend (feather | pyramid |
 //             coverage), px_per_m, car_icon, car_width, car_length, car_x, car_y
 //   pattern:  width, height, pattern_fps -- a synthetic moving test image, for
@@ -46,6 +48,12 @@ struct BevParams {
 
     // Camera mode (and pattern mode's size).
     int         camera_index = 0;
+    std::string camera_id;            // wins over camera_index when set
+    // Import packed (YUYV) frames zero-copy too. Off by default: a USB
+    // camera's driver writes them through the CPU cache, which the GPU
+    // doesn't see flushed, so moving parts show rows of the previous frame
+    // (seen on the Pi 5). Off, they are read and converted on the CPU.
+    bool        packed_zero_copy = false;
     int         width = 0, height = 0; // 0 = the mode's default
     std::string tuning_file;
 
@@ -79,6 +87,10 @@ struct BevParams {
     std::string              config_path = "bev_config.ini";
     std::string              lens_dir;   // empty = config_path's directory
     std::string              blend       = "feather";
+    // One camera seen straight on rather than projected to the ground: its
+    // lens distortion removed, zoomed out by undistort (0 = off, 1 = the
+    // camera's own field, below 1 wider, as a fisheye needs). Needs no hb2i.
+    double                   undistort   = 0.0;
     std::string              car_icon;
     double car_width  = 1.8, car_length = 4.5, car_x = 0.0, car_y = 0.0;
     bool   car_width_set = false, car_length_set = false;

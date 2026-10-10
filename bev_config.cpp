@@ -2,10 +2,24 @@
 
 #include <cctype>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+
+// hb2i used to be board-metres -> image pixels at 3280x2464, with the BEV
+// canvas centred on the board centre (0.27, 0.36). Composing that offset in
+// turns it into a car-frame homography that renders identically.
+static void legacy_hb2i_to_car(BevSlotConfig &s)
+{
+    mat3 T;
+    T.at(0, 2) = 0.27;
+    T.at(1, 2) = 0.36;
+    s.hb2i = s.hb2i * T;
+    s.hb2i_w = 3280;
+    s.hb2i_h = 2464;
+}
 
 BevConfig bev_config_defaults()
 {
@@ -20,10 +34,8 @@ BevConfig bev_config_defaults()
     // Recalibrated from street_captures/f_20260623_101125's camA.png/camB.png
     // (a single shared ChArUco board shot, both cameras, not moved between
     // frames) via cv2.findHomography(board-metres -> image-pixels) per
-    // camera, RANSAC, then rescaled from that capture's 1640x1232 into the
-    // 3280x2464 CAL_W/CAL_H space main.cpp's measured_H() assumes (see its
-    // comment -- must match the resolution the board was shot at, not the
-    // runtime video's own size). 9 shared corners: median=0.91mm,
+    // camera, RANSAC, then rescaled from that capture's 1640x1232 into
+    // 3280x2464 (board-frame, see legacy_hb2i_to_car()). 9 shared corners: median=0.91mm,
     // mean=0.98mm, max=2.40mm overlap alignment error. Supersedes earlier
     // pairs recalibrated the same way from street_captures/20260623_101549
     // (median=1.36mm/mean=1.30mm/max=2.16mm) and captures/20260623_100123
@@ -39,14 +51,35 @@ BevConfig bev_config_defaults()
         0.095, 0.0, 0.45, -30.0, -15.0, 90.0, true,
         mat3{{ 1305.29, -738.869, 0.5491576, 1781.791, 72.92492, -0.150135, 1650.012, 1077.979, 1 }}
     };
-    cfg.slots[2] = BevSlotConfig{ 0.0, -1.0, 1.2, -30.0, 180.0, 270.0, false, mat3{} };
-    cfg.slots[3] = BevSlotConfig{ -0.5, 0.0, 1.2, -30.0,  90.0, 180.0, false, mat3{} };
+    legacy_hb2i_to_car(cfg.slots[0]);
+    legacy_hb2i_to_car(cfg.slots[1]);
+    for (int i = 2; i < BevConfig::kMaxSlots; ++i) cfg.slots[i].facing_deg = bev_position_facing(i);
     return cfg;
 }
 
-// Accepts a cardinal keyword (front/back/left/right, case-insensitive) or a
-// raw degree number -- same bearing convention as BevSlotConfig::facing_deg.
-static bool parse_facing(const std::string &val, double &out)
+static const char *const kPositionNames[kPositionCount] = {
+    "front_left", "front_right", "back_left", "back_right", "front", "right", "back", "left",
+};
+static const double kPositionFacing[kPositionCount] = {135, 45, 225, 315, 90, 0, 270, 180};
+
+const char *bev_position_name(int position)
+{
+    return position >= 0 && position < kPositionCount ? kPositionNames[position] : nullptr;
+}
+
+int bev_position_index(const std::string &name)
+{
+    for (int i = 0; i < kPositionCount; ++i)
+        if (name == kPositionNames[i]) return i;
+    return -1;
+}
+
+double bev_position_facing(int position)
+{
+    return position >= 0 && position < kPositionCount ? kPositionFacing[position] : 90.0;
+}
+
+bool parse_facing(const std::string &val, double &out)
 {
     std::string low = val;
     for (char &c : low) c = (char)std::tolower((unsigned char)c);
@@ -54,6 +87,10 @@ static bool parse_facing(const std::string &val, double &out)
     else if (low == "right") { out = 0.0;   return true; }
     else if (low == "back")  { out = 270.0; return true; }
     else if (low == "left")  { out = 180.0; return true; }
+    if (int p = bev_position_index(low); p >= 0) {
+        out = bev_position_facing(p);
+        return true;
+    }
     try {
         size_t consumed = 0;
         out = std::stod(val, &consumed);
@@ -71,11 +108,14 @@ static std::string trim(const std::string &s)
     return s.substr(a, b - a + 1);
 }
 
-// Parses a "[slotN]" section header; returns false if malformed.
+// Parses a "[front_left]"-style section header, or the older "[slotN]";
+// returns false if malformed.
 static bool parse_slot_header(const std::string &line, int &idx)
 {
     if (line.size() < 3 || line.front() != '[' || line.back() != ']') return false;
     std::string inner = line.substr(1, line.size() - 2);
+    idx = bev_position_index(inner);
+    if (idx >= 0) return true;
     if (inner.rfind("slot", 0) != 0) return false;
     std::string num = inner.substr(4);
     if (num.empty()) return false;
@@ -99,6 +139,7 @@ bool bev_config_load(const std::string &path, BevConfig &out)
     }
 
     int current_slot = -1; // -1 = global section
+    bool saw_hb2i[BevConfig::kMaxSlots] = {}, saw_hb2i_size[BevConfig::kMaxSlots] = {};
     std::string raw;
     int lineno = 0;
     while (std::getline(in, raw)) {
@@ -147,9 +188,10 @@ bool bev_config_load(const std::string &path, BevConfig &out)
                 else if (key == "cam_h") s.cam_h = std::stod(val);
                 else if (key == "pitch") s.pitch = std::stod(val);
                 else if (key == "yaw")   s.yaw   = std::stod(val);
-                else if (key == "cam_x_delta") s.cam_x_delta = std::stod(val);
-                else if (key == "cam_y_delta") s.cam_y_delta = std::stod(val);
-                else if (key == "yaw_delta")   s.yaw_delta   = std::stod(val);
+                // Left behind by the removed live-tune; ignored.
+                else if (key == "cam_x_delta" || key == "cam_y_delta" || key == "yaw_delta") {}
+                else if (key == "hb2i_w") { s.hb2i_w = std::stoi(val); saw_hb2i_size[current_slot] = true; }
+                else if (key == "hb2i_h") { s.hb2i_h = std::stoi(val); saw_hb2i_size[current_slot] = true; }
                 else if (key == "facing") {
                     if (!parse_facing(val, s.facing_deg)) {
                         std::cerr << "[config] " << path << ":" << lineno
@@ -159,6 +201,16 @@ bool bev_config_load(const std::string &path, BevConfig &out)
                     }
                 }
                 else if (key == "lens_model") s.lens_model = val;
+                else if (key == "camera")     s.camera = val;
+                else if (key == "view") {
+                    std::istringstream iss(val);
+                    if (!(iss >> s.view_x0 >> s.view_y0 >> s.view_x1 >> s.view_y1)) {
+                        std::cerr << "[config] " << path << ":" << lineno
+                                  << ": view needs x0 y0 x1 y1, got '" << val << "'\n";
+                        return false;
+                    }
+                    s.has_view = true;
+                }
                 else if (key == "hb2i") {
                     std::istringstream iss(val);
                     double v[9];
@@ -171,6 +223,7 @@ bool bev_config_load(const std::string &path, BevConfig &out)
                     }
                     for (int c = 0; c < 9; ++c) s.hb2i.m[c] = v[c];
                     s.has_hb2i = true;
+                    saw_hb2i[current_slot] = true;
                 } else {
                     std::cerr << "[config] " << path << ":" << lineno
                               << ": unknown slot key '" << key << "'\n";
@@ -183,11 +236,18 @@ bool bev_config_load(const std::string &path, BevConfig &out)
             return false;
         }
     }
+    // A file written before hb2i_w/hb2i_h existed holds board-frame matrices.
+    for (int i = 0; i < BevConfig::kMaxSlots; ++i)
+        if (saw_hb2i[i] && !saw_hb2i_size[i]) legacy_hb2i_to_car(out.slots[i]);
     return true;
 }
 
 bool bev_config_save(const std::string &path, const BevConfig &cfg)
 {
+    // A fresh install has no data directory until something creates it.
+    std::error_code ec;
+    const std::filesystem::path dir = std::filesystem::path(path).parent_path();
+    if (!dir.empty()) std::filesystem::create_directories(dir, ec);
     std::ofstream out(path, std::ios::trunc);
     if (!out.is_open()) {
         std::cerr << "[config] failed to open '" << path << "' for writing\n";
@@ -196,7 +256,7 @@ bool bev_config_save(const std::string &path, const BevConfig &cfg)
 
     out << std::setprecision(9);
     out << "# libcamera-dmabuf-capture -- multi-camera (--src) BEV defaults.\n"
-        << "# Auto-generated; press 'W' at runtime to overwrite with live-tuned values.\n\n";
+        << "# Auto-generated by the calibration screen or 'W' at runtime.\n\n";
     out << "px_per_m = "    << cfg.px_per_m    << "\n";
     out << "overlap_deg = " << cfg.overlap_deg << "\n";
     out << "blend_edge = "  << cfg.blend_edge  << "\n";
@@ -207,21 +267,24 @@ bool bev_config_save(const std::string &path, const BevConfig &cfg)
 
     for (int i = 0; i < BevConfig::kMaxSlots; ++i) {
         const BevSlotConfig &s = cfg.slots[i];
-        out << "\n[slot" << i << "]\n";
+        if (s.camera.empty() && !s.has_hb2i && s.lens_model.empty()) continue;
+        out << "\n[" << bev_position_name(i) << "]\n";
+        if (!s.camera.empty()) out << "camera = " << s.camera << "\n";
         out << "cam_x = " << s.cam_x << "\n";
         out << "cam_y = " << s.cam_y << "\n";
         out << "cam_h = " << s.cam_h << "\n";
         out << "pitch = " << s.pitch << "\n";
         out << "yaw = "   << s.yaw   << "\n";
-        out << "cam_x_delta = " << s.cam_x_delta << "\n";
-        out << "cam_y_delta = " << s.cam_y_delta << "\n";
-        out << "yaw_delta = "   << s.yaw_delta   << "\n";
         out << "facing = " << s.facing_deg << "\n";
         if (s.has_hb2i) {
             out << "hb2i =";
             for (double v : s.hb2i.m) out << " " << v;
             out << "\n";
+            out << "hb2i_w = " << s.hb2i_w << "\n";
+            out << "hb2i_h = " << s.hb2i_h << "\n";
         }
+        if (s.has_view)
+            out << "view = " << s.view_x0 << " " << s.view_y0 << " " << s.view_x1 << " " << s.view_y1 << "\n";
         // Only lens_model is persisted (the empty string IS the "unset"
         // sentinel, same role has_hb2i's bool plays for hb2i) -- fx/fy/../
         // k1../lens_calib_w/h are deliberately never written here, see
@@ -265,6 +328,8 @@ bool lens_calib_load(const std::string &path, BevSlotConfig &slot)
             else if (key == "k1") trial.k1 = std::stod(val);
             else if (key == "k2") trial.k2 = std::stod(val);
             else if (key == "k3") trial.k3 = std::stod(val);
+            else if (key == "k4") trial.k4 = std::stod(val);
+            else if (key == "model" && (val == "pinhole" || val == "fisheye")) trial.fisheye = val == "fisheye";
             else if (key == "p1") trial.p1 = std::stod(val);
             else if (key == "p2") trial.p2 = std::stod(val);
             else if (key == "calib_w") { trial.lens_calib_w = std::stoi(val); have_w = true; }
@@ -292,7 +357,8 @@ bool lens_calib_load(const std::string &path, BevSlotConfig &slot)
     // scratch one main.cpp fills in separately), which a wholesale
     // `slot = trial` would clobber back to BevSlotConfig{}'s defaults.
     slot.fx = trial.fx; slot.fy = trial.fy; slot.cx = trial.cx; slot.cy = trial.cy;
-    slot.k1 = trial.k1; slot.k2 = trial.k2; slot.k3 = trial.k3;
+    slot.k1 = trial.k1; slot.k2 = trial.k2; slot.k3 = trial.k3; slot.k4 = trial.k4;
+    slot.fisheye = trial.fisheye;
     slot.p1 = trial.p1; slot.p2 = trial.p2;
     slot.lens_calib_w = trial.lens_calib_w;
     slot.lens_calib_h = trial.lens_calib_h;
