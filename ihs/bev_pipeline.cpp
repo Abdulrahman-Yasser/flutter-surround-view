@@ -532,8 +532,21 @@ bool BevPipeline::init_surround()
     }
 
     double px_per_m = params_.px_per_m_set ? params_.px_per_m : cfg.px_per_m;
-    if (!params_.px_per_m_set && cfg.view_width_m > 0 && cfg.view_length_m > 0)
-        px_per_m = std::min(canvas_w / cfg.view_width_m, canvas_h / cfg.view_length_m);
+    double view_cx = 0.0, view_cy = 0.0;
+    if (!params_.px_per_m_set) {
+        double x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+        for (const Slot &slot : slots_) {
+            const BevSlotConfig &sc = cfg.slots[slot.cfg_slot];
+            if (!sc.has_view) continue;
+            x0 = std::min(x0, sc.view_x0); y0 = std::min(y0, sc.view_y0);
+            x1 = std::max(x1, sc.view_x1); y1 = std::max(y1, sc.view_y1);
+        }
+        if (x1 > x0 && y1 > y0) {
+            px_per_m = std::min(canvas_w / (x1 - x0), canvas_h / (y1 - y0));
+            view_cx = (x0 + x1) / 2;
+            view_cy = (y0 + y1) / 2;
+        }
+    }
     std::string lens_dir = params_.lens_dir;
     if (lens_dir.empty()) {
         const size_t slash = params_.config_path.find_last_of('/');
@@ -565,7 +578,7 @@ bool BevPipeline::init_surround()
             renderer_->set_distortion_multi(i, lens_mode(sc), fxn, fyn, cxn, cyn,
                 (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)(sc.fisheye ? sc.k4 : sc.p1), (float)sc.p2);
 
-        mat3 H = measured_H(sc, px_per_m, canvas_w, canvas_h);
+        mat3 H = measured_H(sc, px_per_m, canvas_w, canvas_h, view_cx, view_cy);
         if (params_.undistort > 0.0) {
             // Canvas pixel -> the camera's undistorted image, scaled about the
             // principal point; the shader then applies the lens model. That
@@ -591,6 +604,7 @@ bool BevPipeline::init_surround()
     set_blend_edge(cfg.blend_edge);
     renderer_->set_coverage_weight(params_.blend == "coverage" || params_.undistort > 0.0);
     renderer_->set_px_per_m((float)px_per_m);
+    renderer_->set_view_center((float)view_cx, (float)view_cy);
     std::printf("[bev/surround] %d source(s), blend=%s, canvas %dx%d\n",
                 n, params_.blend.c_str(), canvas_w, canvas_h);
     if (live_ && !start_live_cameras()) return false;

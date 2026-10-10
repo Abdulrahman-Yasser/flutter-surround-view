@@ -28,6 +28,11 @@ struct BevSlotConfig {
     // The image size hb2i's pixels are in (the calibration still's), so it
     // can be normalized for whatever resolution the cameras stream at.
     int    hb2i_w = 0, hb2i_h = 0;
+    // Car-frame box (metres) of the ground this camera was calibrated on:
+    // its boards out to the car body. The live view frames the union of its
+    // cameras' boxes instead of using px_per_m.
+    bool   has_view = false;
+    double view_x0 = 0, view_y0 = 0, view_x1 = 0, view_y1 = 0;
 
     // libcamera's id for the camera mounted here (Camera::id(), stable across
     // boots and plug order); empty = no camera assigned to this position.
@@ -87,11 +92,6 @@ struct BevConfig {
     // camB u=[0.0,0.61]) instead of a degenerate sliver -- rescale (canvas
     // size scales with your source video's resolution) if that changes.
     double        px_per_m    = 2200.0;
-    // Ground the view shows, centred on the car, as written by the
-    // calibration screen (the car plus its boards). When set, the live view
-    // fits it to its canvas and px_per_m is ignored; 0 = unset.
-    double        view_width_m  = 0.0;
-    double        view_length_m = 0.0;
     // Angular half-width (degrees) of each camera's canvas coverage wedge,
     // centered on that slot's facing_deg (see BevSlotConfig::facing_deg).
     // Outside every camera's wedge, nothing is drawn there regardless of

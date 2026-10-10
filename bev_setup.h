@@ -11,7 +11,9 @@
 
 // BEV canvas pixel (top-left origin) -> normalized image uv for a calibrated
 // slot. The canvas centre is the car-frame origin, +Y up the canvas.
-mat3 measured_H(const BevSlotConfig &slot, double px_per_m, int bev_w, int bev_h);
+// The canvas centre shows car-frame point (cx, cy).
+mat3 measured_H(const BevSlotConfig &slot, double px_per_m, int bev_w, int bev_h,
+                double cx = 0.0, double cy = 0.0);
 
 // Naming-convention lookup for a per-lens-model distortion file:
 // "<lens_dir>/<lens_model>-lens.ini". lens_model is used verbatim -- no

@@ -253,6 +253,7 @@ uniform float uBevHeight;
 // canvas), already baked into uH[]; kept as a uniform so the blend math
 // below (which recovers world-space X/Y from gl_FragCoord) stays in sync.
 uniform float uPxPerM;
+uniform vec2 uViewCenter;
 
 // Angular half-width, degrees, of the blend zone centered on each camera's
 // facing bearing. Needs to be at least half the largest gap between
@@ -364,8 +365,8 @@ void main() {
 
     // This fragment's bearing relative to the BEV canvas center — used only
     // for blend weighting, not for the per-camera homography lookup above.
-    float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM;
-    float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM;
+    float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM + uViewCenter.x;
+    float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM + uViewCenter.y;
     float thetaFrag = atan(worldY, worldX);
 
     vec3  colorSum  = vec3(0.0);
@@ -416,6 +417,7 @@ uniform int   uNumCameras;
 uniform float uBevWidth;
 uniform float uBevHeight;
 uniform float uPxPerM;
+uniform vec2 uViewCenter;
 
 uniform float uOverlap;
 uniform float uBlendEdge;
@@ -477,8 +479,8 @@ const float kPi = 3.14159265358979;
 void main() {
     vec3 p = vec3(gl_FragCoord.x, uBevHeight - gl_FragCoord.y, 1.0);
 
-    float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM;
-    float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM;
+    float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM + uViewCenter.x;
+    float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM + uViewCenter.y;
     float thetaFrag = atan(worldY, worldX);
 
     vec3  colorSum  = vec3(0.0);
@@ -592,6 +594,7 @@ uniform vec2  uDist2; // p2, lens mode
 uniform float uBevWidth;
 uniform float uBevHeight;
 uniform float uPxPerM;
+uniform vec2 uViewCenter;
 uniform float uOverlap;     // angular half-width, degrees (kFS_MULTI's meaning)
 uniform float uBlendEdge;
 uniform float uFreeYaw;     // same testing escape hatch as kFS_MULTI's uFreeYaw
@@ -634,8 +637,8 @@ void main() {
     if (uFreeYaw > 0.5) {
         w = 1.0;
     } else {
-        float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM;
-        float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM;
+        float worldX    = (gl_FragCoord.x - uBevWidth  * 0.5) / uPxPerM + uViewCenter.x;
+        float worldY    = (gl_FragCoord.y - uBevHeight * 0.5) / uPxPerM + uViewCenter.y;
         float thetaFrag = atan(worldY, worldX);
 
         float d   = mod(thetaFrag - radians(uFacingDeg) + kPi, 2.0 * kPi) - kPi;
@@ -1428,8 +1431,8 @@ void GpuRenderer::set_px_per_m(float v)
         // 1 NDC unit spans W_/2 (or H_/2) pixels, so offset_m * v pixels
         // becomes offset_m * v / (W_/2) NDC, i.e. * 2 / W_.
         glUniform2f(glGetUniformLocation(prog_car_, "uCenter"),
-                    car_center_x_m_ * v * 2.0f / (float)W_,
-                    car_center_y_m_ * v * 2.0f / (float)H_);
+                    (car_center_x_m_ - view_cx_m_) * v * 2.0f / (float)W_,
+                    (car_center_y_m_ - view_cy_m_) * v * 2.0f / (float)H_);
     }
 }
 
@@ -1442,8 +1445,20 @@ void GpuRenderer::set_car_center(float center_x_m, float center_y_m)
     // Same conversion set_px_per_m() uses, just off the cached px_per_m_
     // rather than a freshly-passed value, since px_per_m isn't changing here.
     glUniform2f(glGetUniformLocation(prog_car_, "uCenter"),
-                car_center_x_m_ * px_per_m_ * 2.0f / (float)W_,
-                car_center_y_m_ * px_per_m_ * 2.0f / (float)H_);
+                (car_center_x_m_ - view_cx_m_) * px_per_m_ * 2.0f / (float)W_,
+                (car_center_y_m_ - view_cy_m_) * px_per_m_ * 2.0f / (float)H_);
+}
+
+void GpuRenderer::set_view_center(float x_m, float y_m)
+{
+    view_cx_m_ = x_m;
+    view_cy_m_ = y_m;
+    for (GLuint prog : {prog_multi_, prog_pyr_warp_}) {
+        if (!prog) continue;
+        glUseProgram(prog);
+        glUniform2f(glGetUniformLocation(prog, "uViewCenter"), x_m, y_m);
+    }
+    set_px_per_m(px_per_m_);
 }
 
 void GpuRenderer::render_frame(const DmaBufFrame &left, const DmaBufFrame &right)

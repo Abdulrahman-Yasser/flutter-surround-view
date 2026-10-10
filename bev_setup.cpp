@@ -1,11 +1,11 @@
 #include "bev_setup.h"
 
-mat3 measured_H(const BevSlotConfig &slot, double px_per_m, int bev_w, int bev_h)
+mat3 measured_H(const BevSlotConfig &slot, double px_per_m, int bev_w, int bev_h, double cx, double cy)
 {
     const double r = px_per_m;
     mat3 S;
-    S.at(0,0)= 1.0/r; S.at(0,1)= 0.0;   S.at(0,2)= -(bev_w/2.0)/r;
-    S.at(1,0)= 0.0;   S.at(1,1)=-1.0/r; S.at(1,2)=  (bev_h/2.0)/r;
+    S.at(0,0)= 1.0/r; S.at(0,1)= 0.0;   S.at(0,2)= -(bev_w/2.0)/r + cx;
+    S.at(1,0)= 0.0;   S.at(1,1)=-1.0/r; S.at(1,2)=  (bev_h/2.0)/r + cy;
     S.at(2,0)= 0.0;   S.at(2,1)= 0.0;   S.at(2,2)= 1.0;
 
     mat3 H = slot.hb2i * S;

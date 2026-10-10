@@ -752,19 +752,26 @@ void CalibSession::apply(BevConfig &cfg) const
         s.hb2i_h = c.image.rows;
         s.facing_deg = cc.facing_deg;
         s.lens_model = cc.lens;
+
+        // The boards this camera saw, and the ground between them and the
+        // car body (each corner clamped onto the car's outline).
+        std::set<int> seen;
+        for (const CalibPoint &p : c.points) seen.insert(p.board);
+        const double hw = layout_.car_width / 2, hl = layout_.car_length / 2, margin = 0.5;
+        double x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+        auto grow = [&](double x, double y) {
+            x0 = std::min(x0, x); x1 = std::max(x1, x);
+            y0 = std::min(y0, y); y1 = std::max(y1, y);
+        };
+        for (int b : seen)
+            for (const cv::Point2d &p : world_[b]) {
+                grow(p.x, p.y);
+                grow(std::clamp(p.x, -hw, hw), std::clamp(p.y, -hl, hl));
+            }
+        s.has_view = !seen.empty();
+        s.view_x0 = x0 - margin; s.view_y0 = y0 - margin;
+        s.view_x1 = x1 + margin; s.view_y1 = y1 + margin;
     }
-    // The view is centred on the car, so it spans twice the farthest board
-    // (or car edge) on each axis. Grown, never shrunk: calibrating the back
-    // pair after the front one mustn't crop the front boards out.
-    double half_w = layout_.car_width / 2, half_l = layout_.car_length / 2;
-    for (const auto &board : world_)
-        for (const cv::Point2d &p : board) {
-            half_w = std::max(half_w, std::abs(p.x));
-            half_l = std::max(half_l, std::abs(p.y));
-        }
-    const double margin = 0.5;
-    cfg.view_width_m = std::max(cfg.view_width_m, 2 * (half_w + margin));
-    cfg.view_length_m = std::max(cfg.view_length_m, 2 * (half_l + margin));
     cfg.car_width = layout_.car_width;
     cfg.car_length = layout_.car_length;
     cfg.car_x = 0.0;

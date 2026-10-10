@@ -161,6 +161,9 @@ public:
     // uCenter uniform (see kVS_CAR) from the last px_per_m set_px_per_m()
     // saw. No-op if init_car_icon() was never called/failed.
     void set_car_center(float center_x_m, float center_y_m);
+    // Car-frame point at the canvas centre, metres. The blend wedges and the
+    // car icon stay anchored to the car, not to the canvas.
+    void set_view_center(float x_m, float y_m);
 
     // N-camera surround-view BEV, multi-band (Laplacian pyramid) blend —
     // a separate, comparable alternative to init_multi()/render_frame_multi()
@@ -284,6 +287,7 @@ private:
     // caller having to re-pass px_per_m every time, symmetric with
     // car_half_w_m_/car_half_l_m_ already being cached for the same reason.
     float  px_per_m_ = 100.0f;
+    float  view_cx_m_ = 0.0f, view_cy_m_ = 0.0f;
 
     // N-camera surround-view, multi-band (Laplacian pyramid) blend mode.
     // Own programs and own per-camera source textures — deliberately
