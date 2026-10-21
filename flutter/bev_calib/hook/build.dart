@@ -41,7 +41,6 @@ void main(List<String> args) async {
       '-DCMAKE_BUILD_TYPE=$buildType',
       '-DENABLE_CALIB=ON',
       '-DENABLE_IHS_PV=OFF',
-      '-DENABLE_WAYLAND_PREVIEW=OFF',
       if (toolchain != null) '-DCMAKE_TOOLCHAIN_FILE=$toolchain',
       if (!File('${buildDir}CMakeCache.txt').existsSync() && await _which('ninja')) ...[
         '-G',
