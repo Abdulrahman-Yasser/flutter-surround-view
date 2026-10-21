@@ -9,8 +9,8 @@
 #     --app /path/to/libcamera-dmabuf-capture/flutter/bev_view/example \
 #     --mode release --deploy <user>@<host> --deploy-dir bev-view --run
 #
-# The pipeline's own dependencies mostly come for free: libcamera and
-# GStreamer from ivi-homescreen's Pi targets, and EGL/GLES, DRM, gbm and the
+# The pipeline's own dependencies mostly come for free: libcamera from
+# ivi-homescreen's Pi targets, and EGL/GLES, DRM, gbm and the
 # Vulkan loader from emb's board library. libpng is the one this app needs and
 # nothing above it does -- gpu_renderer.cpp encodes snapshots with it.
 #

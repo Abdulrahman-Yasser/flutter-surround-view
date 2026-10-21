@@ -22,10 +22,6 @@ pkg_check_modules(GBM        REQUIRED IMPORTED_TARGET gbm)
 pkg_check_modules(EGL        REQUIRED IMPORTED_TARGET egl)
 pkg_check_modules(GLESV2     REQUIRED IMPORTED_TARGET glesv2)
 pkg_check_modules(PNG        REQUIRED IMPORTED_TARGET libpng)
-pkg_check_modules(GST        REQUIRED IMPORTED_TARGET gstreamer-1.0)
-pkg_check_modules(GST_APP    REQUIRED IMPORTED_TARGET gstreamer-app-1.0)
-pkg_check_modules(GST_ALLOC  REQUIRED IMPORTED_TARGET gstreamer-allocators-1.0)
-pkg_check_modules(GST_VIDEO  REQUIRED IMPORTED_TARGET gstreamer-video-1.0)
 
 # ── Pipeline core ────────────────────────────────────────────────────────────
 # The capture and render pipeline behind the ivi-homescreen platform view
@@ -48,7 +44,6 @@ target_include_directories(bev_conf PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_library(bev_core STATIC
     capture_session.cpp
     gpu_renderer.cpp
-    file_source.cpp
 )
 set_target_properties(bev_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -70,10 +65,6 @@ target_link_libraries(bev_core PUBLIC
     PkgConfig::EGL
     PkgConfig::GLESV2
     PkgConfig::PNG
-    PkgConfig::GST
-    PkgConfig::GST_APP
-    PkgConfig::GST_ALLOC
-    PkgConfig::GST_VIDEO
 )
 
 # ── ivi-homescreen platform view (libbev_view.so) ────────────────────────────

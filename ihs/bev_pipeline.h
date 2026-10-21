@@ -13,7 +13,6 @@
 #include "capture_session.h"
 #include "egl_context.h"
 #include "cpu_frames.h"
-#include "file_source.h"
 #include "gpu_renderer.h"
 
 #include <libcamera/libcamera.h>
@@ -34,7 +33,7 @@ public:
     bool init(const EGLState &egl, const BevParams &params);
 
     // Renders the next frame. Paces itself: blocks for the camera's next
-    // frame, or sleeps to a recording's frame rate. Returns false when the
+    // frame, or sleeps to the pattern's frame rate. Returns false when the
     // source has nothing more to give (or interrupt() was called).
     bool render_next();
 
@@ -59,8 +58,6 @@ private:
     struct Slot {
         std::string                 path;
         int                         cfg_slot = 0;
-        std::unique_ptr<FileSource> src;
-        DmaBufFrame                 frame;
 
         int width = 0, height = 0, stride = 0;
 
@@ -76,14 +73,11 @@ private:
     };
 
     bool init_camera();
-    bool init_file();
     bool init_surround();
     bool init_pattern();
 
     bool render_camera();
-    bool render_file();
     bool render_surround();
-    bool render_surround_live();
     bool open_live_slot(Slot &slot, std::shared_ptr<libcamera::Camera> camera);
     bool start_live_cameras();
     void stop_live_cameras();
@@ -91,7 +85,6 @@ private:
     bool render_pattern();
 
     void pace(double frame_duration_ms);
-    static bool advance(FileSource &src, const std::string &path, DmaBufFrame &frame);
 
     const EGLState              *egl_ = nullptr;
     BevParams                    params_;
@@ -115,16 +108,10 @@ private:
     // Set for a camera the GPU can't import (a USB camera's YUYV).
     std::unique_ptr<CpuFrames>                          camera_cpu_;
 
-    // File mode.
-    std::unique_ptr<FileSource> file_src_;
-    DmaBufFrame                 file_frame_;
-
     // Surround mode.
     std::vector<Slot>        slots_;
     std::vector<DmaBufFrame> frames_;
     bool                     cpu_live_ = false;
-    bool                     pyramid_ = false;
-    bool                     live_    = false;
 
     std::vector<CaptureSession *>                 live_sessions_;
     std::vector<const libcamera::FrameBuffer *>   live_bufs_;

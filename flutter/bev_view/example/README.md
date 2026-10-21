@@ -17,8 +17,8 @@ no Flutter texture and no Linux desktop runner — the shell is the runner.
 ./run.sh                                   # wayland-egl, test pattern
 BACKEND=wayland-vulkan ./run.sh            # same view on the Vulkan backend
 BEV_MODE=camera BACKEND=drm-kms-egl ./run.sh
-BEV_MODE=surround BEV_SRC=front_l.hevc:front_r.hevc \
-  BEV_CONFIG=/path/to/bev_config.ini BEV_BLEND=pyramid ./run.sh
+BEV_MODE=surround BEV_CAMERAS=2 \
+  BEV_CONFIG=/path/to/bev_config.ini ./run.sh
 ```
 
 `run.sh` builds the bundle (the native-assets hook compiles `libbev_view.so`
@@ -127,7 +127,6 @@ A PiOS *lite* image carries neither of the first two:
 
 | | |
 |---|---|
-| GStreamer runtime | `sudo apt install libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad` — `libbev_view.so` links it for the file and surround modes, so without it the library will not load at all |
 | `libdisplay-info` | `sudo apt install libdisplay-info2` — the trixie shell links it; alternatively copy `libdisplay-info.so.0.2.0` out of the emb sysroot into the bundle's `lib/` and recreate the soname link beside it (`ln -sf libdisplay-info.so.0.2.0 lib/libdisplay-info.so.2`), which the prune above eats along with the library. The Pi 5 image already carries it |
 | a camera | `BEV_MODE=camera` needs one attached; check with `rpicam-hello --list-cameras` |
 
@@ -307,9 +306,8 @@ wall-clock vsync source sidesteps it. HDMI on vc4 is unaffected, as is
   left, band moves down: if either is reversed, the orientation is wrong.
 - **camera** — the IMX219 through the red-tint + parking-grid shader, after the
   30-frame AE/AWB warm-up.
-- **file** / **surround** — the recording(s), looping on EOS. Surround adds the
-  overlap/edge steppers and the free-yaw toggle, with the same steps as the CLI's
-  `+`/`-` and `[`/`]`.
+- **surround** — the live cameras stitched on the ground, with the overlap/edge
+  steppers and the free-yaw toggle.
 
 The top-left overlay reads the view's counters every 500 ms: fps, source and
 view size, the grant, and the buffer allocator. **snapshot** writes
@@ -332,7 +330,7 @@ Producer counters alone cannot tell you the picture reached the display: they
 count submits, not presents. If the stats look healthy while the screen is
 frozen, check the shell's own present log before suspecting the view.
 
-If the pipeline cannot start (no camera, a missing file, a config slot without
+If the pipeline cannot start (no camera, a config slot without
 `hb2i`), the view shows black and the reason is in the native log under
 `[bev/ihs_pv]` / `[bev/surround]` etc. The creation params are checked before
 the view is created, so a malformed one fails the create with the parse error
@@ -345,14 +343,12 @@ arguments, so the source is chosen from the environment:
 
 | | |
 |---|---|
-| `BEV_MODE` | `pattern` (default), `camera`, `file`, `surround` |
+| `BEV_MODE` | `pattern` (default), `camera`, `surround` |
 | `BEV_CAMERA`, `BEV_TUNING_FILE` | camera index; IPA tuning JSON (`--tuning-file`) |
 | `BEV_CAM_FPS` | pin the sensor's frame duration; unset leaves the rate to auto-exposure, which trades it for light |
-| `BEV_FILE`, `BEV_FILE_BEV=1` | HEVC recording; forward bird's-eye view (`--bev`) |
-| `BEV_SRC` | recordings in config-slot order, `:`-separated (`--src`) |
-| `BEV_FORWARD_LEFT` … `BEV_BACKWARD_RIGHT` | the fixed-slot pair rig (`--forward-left` …) |
+| `BEV_CAMERAS`, `BEV_WIDTH`, `BEV_HEIGHT` | surround: live cameras 0..N-1 and their stream size |
 | `BEV_CONFIG`, `BEV_LENS_DIR` | `bev_config.ini`; lens file directory |
-| `BEV_BLEND`, `BEV_PX_PER_M`, `BEV_CAR_ICON` | `feather`/`pyramid`/`coverage`; overrides; car PNG |
+| `BEV_BLEND`, `BEV_PX_PER_M`, `BEV_CAR_ICON` | `feather`/`coverage`; overrides; car PNG |
 | `BEV_FIT` | `contain` (default), `cover`, `fill` |
 | `BEV_SCANOUT=1` | request a KMS plane when the shell offers one |
 | `BEV_RENDER_NODE` | native: the DRM render node the view's EGL display opens |
@@ -363,15 +359,14 @@ the bundle's `flutter_assets`.
 ## Creation params
 
 `BevSource` encodes to UTF-8 `key=value` lines, sent raw as the platform view's
-creation params and parsed by `ihs/bev_params.cpp`. The keys mirror the CLI's
-flags one for one (`--forward-left` → `forward_left=`), so a working command
-line translates directly. The full list is at the top of `ihs/bev_params.h`.
+creation params and parsed by `ihs/bev_params.cpp`. The full list is at the top of
+`ihs/bev_params.h`.
 
 ## Building the native library by hand
 
 ```bash
 cmake -S ../../.. -B build-pv -G Ninja \
-  -DENABLE_IHS_PV=ON -DENABLE_WAYLAND_PREVIEW=OFF \
+  -DENABLE_IHS_PV=ON \
   -DIHS_DIR=/path/to/ivi-homescreen -DIHS_BUILD_DIR=/path/to/ivi-homescreen/build
 cmake --build build-pv --target bev_view
 ```

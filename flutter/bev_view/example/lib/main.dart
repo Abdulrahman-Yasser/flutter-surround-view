@@ -10,16 +10,12 @@ import 'package:flutter/material.dart';
 /// app no arguments, so the environment is the one channel that reaches it
 /// through the normal build and deploy path.
 ///
-///   BEV_MODE        pattern (default) | camera | file | surround
+///   BEV_MODE        pattern (default) | camera | surround
 ///   BEV_CAMERA      camera index                               (camera)
 ///   BEV_CAM_FPS     pin the sensor's frame rate                (camera)
 ///   BEV_TUNING_FILE IPA tuning JSON                            (camera)
-///   BEV_FILE        HEVC recording                             (file)
-///   BEV_FILE_BEV    1 = forward bird's-eye view                (file)
-///   BEV_SRC         recordings, ':'-separated, in slot order   (surround)
 ///   BEV_CAMERAS     number of live cameras, slots 0..N-1       (surround)
 ///   BEV_WIDTH / BEV_HEIGHT   live camera stream size            (surround)
-///   BEV_FORWARD_LEFT / _RIGHT, BEV_BACKWARD_LEFT / _RIGHT      (surround)
 ///   BEV_CONFIG      bev_config.ini path                        (surround)
 ///   BEV_LENS_DIR, BEV_BLEND, BEV_PX_PER_M, BEV_CAR_ICON        (surround)
 ///   BEV_FIT         contain (default) | cover | fill
@@ -37,58 +33,21 @@ BevSource sourceFromEnvironment(Map<String, String> env) {
         fps: double.tryParse(get('BEV_CAM_FPS') ?? ''),
         tuningFile: get('BEV_TUNING_FILE'),
       );
-    case 'file':
-      final path = get('BEV_FILE');
-      if (path == null) throw StateError('BEV_MODE=file needs BEV_FILE');
-      return BevFileSource(
-        path,
-        bev: get('BEV_FILE_BEV') == '1' ? const BevGroundPose() : null,
-      );
     case 'surround':
       final blend = BevBlend.values.asNameMap()[get('BEV_BLEND') ?? 'feather'] ??
           BevBlend.feather;
       final carIcon = get('BEV_CAR_ICON');
-      final common = (
+      final cameras = int.tryParse(get('BEV_CAMERAS') ?? '') ?? 1;
+      return BevSurroundSource(
+        [for (var i = 0; i < cameras; i++) 'camera:$i'],
         config: get('BEV_CONFIG') ?? 'bev_config.ini',
         lensDir: get('BEV_LENS_DIR'),
+        blend: blend,
         pxPerMeter: double.tryParse(get('BEV_PX_PER_M') ?? ''),
         carIcon: carIcon == null ? null : BevCarIcon(carIcon),
-      );
-      final cameras = int.tryParse(get('BEV_CAMERAS') ?? '');
-      if (cameras != null) {
-        return BevSurroundSource(
-          [for (var i = 0; i < cameras; i++) 'camera:$i'],
-          config: common.config,
-          lensDir: common.lensDir,
-          blend: blend,
-          pxPerMeter: common.pxPerMeter,
-          carIcon: common.carIcon,
-          fps: double.tryParse(get('BEV_CAM_FPS') ?? ''),
-          width: int.tryParse(get('BEV_WIDTH') ?? ''),
-          height: int.tryParse(get('BEV_HEIGHT') ?? ''),
-        );
-      }
-      final src = get('BEV_SRC');
-      if (src != null) {
-        return BevSurroundSource(
-          src.split(':'),
-          config: common.config,
-          lensDir: common.lensDir,
-          blend: blend,
-          pxPerMeter: common.pxPerMeter,
-          carIcon: common.carIcon,
-        );
-      }
-      return BevSurroundSource.pairs(
-        forwardLeft: get('BEV_FORWARD_LEFT'),
-        forwardRight: get('BEV_FORWARD_RIGHT'),
-        backwardLeft: get('BEV_BACKWARD_LEFT'),
-        backwardRight: get('BEV_BACKWARD_RIGHT'),
-        config: common.config,
-        lensDir: common.lensDir,
-        blend: blend,
-        pxPerMeter: common.pxPerMeter,
-        carIcon: common.carIcon,
+        fps: double.tryParse(get('BEV_CAM_FPS') ?? ''),
+        width: int.tryParse(get('BEV_WIDTH') ?? ''),
+        height: int.tryParse(get('BEV_HEIGHT') ?? ''),
       );
     case 'pattern':
       // BEV_PATTERN_FPS=0 runs it uncapped, to measure the ceiling.
