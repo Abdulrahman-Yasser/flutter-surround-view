@@ -102,7 +102,6 @@ bool BevPipeline::init(const EGLState &egl, const BevParams &params)
 
     switch (params_.mode) {
     case BevParams::Mode::Camera:   return init_camera();
-    case BevParams::Mode::File:     return init_file();
     case BevParams::Mode::Surround: return init_surround();
     case BevParams::Mode::Pattern:  return init_pattern();
     }
@@ -114,7 +113,6 @@ bool BevPipeline::render_next()
     if (!renderer_) return false;
     switch (params_.mode) {
     case BevParams::Mode::Camera:   return render_camera();
-    case BevParams::Mode::File:     return render_file();
     case BevParams::Mode::Surround: return render_surround();
     case BevParams::Mode::Pattern:  return render_pattern();
     }
@@ -157,7 +155,6 @@ void BevPipeline::shutdown()
     release_live_slots();
     camera_manager_.reset();
 
-    file_src_.reset();
     slots_.clear();
     frames_.clear();
     pattern_.clear();
@@ -187,18 +184,6 @@ void BevPipeline::pace(double frame_duration_ms)
         std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(next_due_ - now));
     else
         next_due_ = now; // fell behind: re-anchor rather than sprint to catch up
-}
-
-// Next frame, looping the recording on EOS -- a view keeps playing rather than
-// freezing on its last frame.
-bool BevPipeline::advance(FileSource &src, const std::string &path, DmaBufFrame &frame)
-{
-    frame = src.nextFrame();
-    if (frame.data) return true;
-    std::printf("[bev/file] EOS -- looping %s\n", path.c_str());
-    src.close();
-    if (src.open(path)) frame = src.nextFrame();
-    return frame.data != nullptr;
 }
 
 // ── Camera ───────────────────────────────────────────────────────────────────
@@ -266,7 +251,7 @@ bool BevPipeline::init_camera()
         if (!renderer_->init(*egl_, sc, buffer_allocator_->buffers(stream_))) return false;
     } else {
         // A packed format (a USB camera's YUYV): imported as is when the GPU
-        // takes it, else converted on the CPU and uploaded, as file mode does.
+        // takes it, else converted on the CPU and uploaded.
         renderer_->set_import({(int)sc.size.width, (int)sc.size.height, (int)sc.stride,
                                GpuRenderer::drm_fourcc(sc.pixelFormat)});
         if (params_.packed_zero_copy && renderer_->init(*egl_, sc, buffer_allocator_->buffers(stream_))) {
@@ -352,63 +337,27 @@ bool BevPipeline::render_camera()
     return true;
 }
 
-// ── Single file ──────────────────────────────────────────────────────────────
-
-bool BevPipeline::init_file()
-{
-    file_src_ = std::make_unique<FileSource>();
-    if (!file_src_->open(params_.file)) return false;
-    file_frame_ = file_src_->nextFrame();
-    if (!file_frame_.data) {
-        std::fprintf(stderr, "[bev/file] no first frame from %s\n", params_.file.c_str());
-        return false;
-    }
-    const DmaBufFrame &f = file_frame_;
-    if (!renderer_->init(*egl_, f.width, f.height, f.stride)) return false;
-
-    if (params_.bev) {
-        if (!renderer_->init_bev()) return false;
-        renderer_->set_bev_enabled(true);
-        mat3 K = build_intrinsics(f.width, f.height);
-        mat3 H = ground_to_image_H(0.0, params_.cam_y, params_.cam_h, params_.pitch, params_.yaw,
-                                   K, f.width, f.height, params_.px_per_m, f.width, f.height);
-        float Hf[9];
-        H.to_floats(Hf);
-        renderer_->set_bev(Hf);
-    }
-    return true;
-}
-
-bool BevPipeline::render_file()
-{
-    if (!file_frame_.data) return false;
-    renderer_->render_frame(file_frame_);
-    pace(file_src_->frame_duration_ms());
-    return advance(*file_src_, params_.file, file_frame_);
-}
-
 // ── N-camera surround view ───────────────────────────────────────────────────
-// run_multi_file_mode()'s setup, minus the keyboard.
 
 bool BevPipeline::init_surround()
 {
     const int n = (int)params_.sources.size();
-    pyramid_ = params_.blend == "pyramid";
-    const int max_cams = pyramid_ ? GpuRenderer::kPyramidMaxCameras : GpuRenderer::kMaxCameras;
-    if (n < 1 || n > max_cams) {
-        std::fprintf(stderr, "[bev/surround] %d source(s), must be 1..%d\n", n, max_cams);
+    if (n < 1 || n > GpuRenderer::kMaxCameras) {
+        std::fprintf(stderr, "[bev/surround] %d source(s), must be 1..%d\n", n, GpuRenderer::kMaxCameras);
         return false;
     }
 
-    auto is_live = [](const std::string &s) {
-        return s.rfind("camera:", 0) == 0 || s.rfind("position:", 0) == 0;
-    };
     for (int i = 0; i < n; ++i) {
         const std::string &src = params_.sources[(size_t)i];
-        if (src.rfind("camera:", 0) == 0)
+        if (src.rfind("camera:", 0) == 0) {
             params_.cfg_slots[(size_t)i] = std::atoi(src.c_str() + 7);
-        else if (src.rfind("position:", 0) == 0)
+        } else if (src.rfind("position:", 0) == 0) {
             params_.cfg_slots[(size_t)i] = bev_position_index(src.substr(9));
+        } else {
+            std::fprintf(stderr, "[bev/surround] source '%s' is not camera:<index> or position:<name>\n",
+                         src.c_str());
+            return false;
+        }
     }
 
     BevConfig cfg;
@@ -423,65 +372,35 @@ bool BevPipeline::init_surround()
         }
     }
 
-    bool any_live = false, all_live = true;
-    for (const std::string &s : params_.sources) {
-        any_live = any_live || is_live(s);
-        all_live = all_live && is_live(s);
-    }
-    if (any_live && !all_live) {
-        std::fprintf(stderr, "[bev/surround] camera sources cannot be mixed with files\n");
-        return false;
-    }
-    if (any_live && pyramid_) {
-        std::fprintf(stderr, "[bev/surround] blend=pyramid has no live camera path\n");
-        return false;
-    }
-    live_ = any_live;
-    if (live_) {
-        camera_manager_ = acquire_camera_manager(params_.tuning_file);
-        if (!camera_manager_) return false;
-    }
+    camera_manager_ = acquire_camera_manager(params_.tuning_file);
+    if (!camera_manager_) return false;
 
     slots_.resize((size_t)n);
     for (int i = 0; i < n; ++i) {
         Slot &slot    = slots_[(size_t)i];
         slot.path     = params_.sources[(size_t)i];
         slot.cfg_slot = params_.cfg_slots[(size_t)i];
-        if (live_) {
-            std::shared_ptr<Camera> camera;
-            if (slot.path.rfind("position:", 0) == 0) {
-                const std::string &id = cfg.slots[slot.cfg_slot].camera;
-                camera = id.empty() ? nullptr : camera_manager_->get(id);
-                if (!camera) {
-                    std::fprintf(stderr, "[bev/surround] %s: %s\n", slot.path.c_str(),
-                                 id.empty() ? "no camera assigned in the config" : "camera not connected");
-                    return false;
-                }
-            } else {
-                const auto cameras = camera_manager_->cameras();
-                const int index = std::atoi(slot.path.c_str() + 7);
-                if (index < 0 || (size_t)index >= cameras.size()) {
-                    std::fprintf(stderr, "[bev/surround] camera %d requested, but %zu camera(s) detected\n",
-                                 index, cameras.size());
-                    return false;
-                }
-                camera = cameras[(size_t)index];
+        std::shared_ptr<Camera> camera;
+        if (slot.path.rfind("position:", 0) == 0) {
+            const std::string &id = cfg.slots[slot.cfg_slot].camera;
+            camera = id.empty() ? nullptr : camera_manager_->get(id);
+            if (!camera) {
+                std::fprintf(stderr, "[bev/surround] %s: %s\n", slot.path.c_str(),
+                             id.empty() ? "no camera assigned in the config" : "camera not connected");
+                return false;
             }
-            if (!open_live_slot(slot, camera)) return false;
-            continue;
+        } else {
+            const auto cameras = camera_manager_->cameras();
+            const int index = std::atoi(slot.path.c_str() + 7);
+            if (index < 0 || (size_t)index >= cameras.size()) {
+                std::fprintf(stderr, "[bev/surround] camera %d requested, but %zu camera(s) detected\n",
+                             index, cameras.size());
+                return false;
+            }
+            camera = cameras[(size_t)index];
         }
-        slot.src      = std::make_unique<FileSource>();
-        if (!slot.src->open(slot.path)) return false;
-        slot.frame = slot.src->nextFrame();
-        if (!slot.frame.data) {
-            std::fprintf(stderr, "[bev/surround] no first frame from %s\n", slot.path.c_str());
-            return false;
-        }
-        slot.width  = slot.frame.width;
-        slot.height = slot.frame.height;
-        slot.stride = slot.frame.stride;
+        if (!open_live_slot(slot, camera)) return false;
     }
-    if (!live_) frames_.resize((size_t)n);
 
     const int canvas_w = slots_[0].width, canvas_h = slots_[0].height;
     // Live cameras are imported zero-copy, each with its own size and format
@@ -489,36 +408,30 @@ bool BevPipeline::init_surround()
     // the GPU refuses one, every camera goes through memory instead: NV12 as
     // is, the packed ones converted on the CPU.
     cpu_live_ = false;
-    if (live_) {
-        if (!renderer_->init_multi_live(*egl_, canvas_w, canvas_h, slots_[0].stride, n)) return false;
-        for (int i = 0; i < n && !cpu_live_; ++i) {
-            const Slot &slot = slots_[(size_t)i];
-            const StreamConfiguration &sc = slot.config->at(0);
-            const GpuRenderer::Import import{slot.width, slot.height, slot.stride,
-                                             GpuRenderer::drm_fourcc(sc.pixelFormat)};
-            const bool packed = sc.pixelFormat != formats::NV12;
-            if ((packed && !params_.packed_zero_copy) ||
-                !renderer_->set_live_import(i, import, slot.allocator->buffers(slot.stream)[0].get())) {
-                std::printf("[bev/surround] the GPU won't import %s from %s; frames go through memory\n",
-                            sc.pixelFormat.toString().c_str(), slot.path.c_str());
-                cpu_live_ = true;
-            }
-        }
-        if (cpu_live_) {
-            renderer_ = std::make_unique<GpuRenderer>();
-            for (Slot &slot : slots_) {
-                slot.cpu = std::make_unique<CpuFrames>();
-                if (!slot.cpu->map(slot.allocator->buffers(slot.stream), slot.config->at(0))) return false;
-            }
-            frames_.resize((size_t)n);
-        } else {
-            std::printf("[bev/surround] every camera imported zero-copy\n");
+    if (!renderer_->init_multi_live(*egl_, canvas_w, canvas_h, slots_[0].stride, n)) return false;
+    for (int i = 0; i < n && !cpu_live_; ++i) {
+        const Slot &slot = slots_[(size_t)i];
+        const StreamConfiguration &sc = slot.config->at(0);
+        const GpuRenderer::Import import{slot.width, slot.height, slot.stride,
+                                         GpuRenderer::drm_fourcc(sc.pixelFormat)};
+        const bool packed = sc.pixelFormat != formats::NV12;
+        if ((packed && !params_.packed_zero_copy) ||
+            !renderer_->set_live_import(i, import, slot.allocator->buffers(slot.stream)[0].get())) {
+            std::printf("[bev/surround] the GPU won't import %s from %s; frames go through memory\n",
+                        sc.pixelFormat.toString().c_str(), slot.path.c_str());
+            cpu_live_ = true;
         }
     }
-    if (!live_ || cpu_live_) {
-        const bool ok = pyramid_ ? renderer_->init_multi_pyramid(*egl_, canvas_w, canvas_h, slots_[0].stride, n)
-                                 : renderer_->init_multi(*egl_, canvas_w, canvas_h, slots_[0].stride, n);
-        if (!ok) return false;
+    if (cpu_live_) {
+        renderer_ = std::make_unique<GpuRenderer>();
+        for (Slot &slot : slots_) {
+            slot.cpu = std::make_unique<CpuFrames>();
+            if (!slot.cpu->map(slot.allocator->buffers(slot.stream), slot.config->at(0))) return false;
+        }
+        frames_.resize((size_t)n);
+        if (!renderer_->init_multi(*egl_, canvas_w, canvas_h, slots_[0].stride, n)) return false;
+    } else {
+        std::printf("[bev/surround] every camera imported zero-copy\n");
     }
 
     if (!params_.car_icon.empty()) {
@@ -571,12 +484,8 @@ bool BevPipeline::init_surround()
             cxn = (float)sc.cx * sx / (float)slot.width;
             cyn = (float)sc.cy * sy / (float)slot.height;
         }
-        if (pyramid_)
-            renderer_->set_distortion_multi_pyramid(i, lens_mode(sc), fxn, fyn, cxn, cyn,
-                (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)(sc.fisheye ? sc.k4 : sc.p1), (float)sc.p2);
-        else
-            renderer_->set_distortion_multi(i, lens_mode(sc), fxn, fyn, cxn, cyn,
-                (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)(sc.fisheye ? sc.k4 : sc.p1), (float)sc.p2);
+        renderer_->set_distortion_multi(i, lens_mode(sc), fxn, fyn, cxn, cyn,
+            (float)sc.k1, (float)sc.k2, (float)sc.k3, (float)(sc.fisheye ? sc.k4 : sc.p1), (float)sc.p2);
 
         mat3 H = measured_H(sc, px_per_m, canvas_w, canvas_h, view_cx, view_cy);
         if (params_.undistort > 0.0) {
@@ -594,8 +503,7 @@ bool BevPipeline::init_surround()
         }
         float Hf[9];
         H.to_floats(Hf);
-        if (pyramid_) renderer_->set_ipm_multi_pyramid(i, Hf, (float)sc.facing_deg);
-        else          renderer_->set_ipm_multi(i, Hf, (float)sc.facing_deg);
+        renderer_->set_ipm_multi(i, Hf, (float)sc.facing_deg);
         std::printf("[bev/surround] source %d -> config slot %d (%s)\n",
                     i, slot.cfg_slot + 1, slot.path.c_str());
     }
@@ -607,20 +515,7 @@ bool BevPipeline::init_surround()
     renderer_->set_view_center((float)view_cx, (float)view_cy);
     std::printf("[bev/surround] %d source(s), blend=%s, canvas %dx%d\n",
                 n, params_.blend.c_str(), canvas_w, canvas_h);
-    if (live_ && !start_live_cameras()) return false;
-    return true;
-}
-
-bool BevPipeline::render_surround()
-{
-    if (live_) return render_surround_live();
-    for (size_t i = 0; i < slots_.size(); ++i) frames_[i] = slots_[i].frame;
-    if (pyramid_) renderer_->render_frame_multi_pyramid(frames_);
-    else          renderer_->render_frame_multi(frames_);
-    pace(slots_[0].src->frame_duration_ms());
-    for (auto &slot : slots_)
-        if (!advance(*slot.src, slot.path, slot.frame)) return false;
-    return true;
+    return start_live_cameras();
 }
 
 bool BevPipeline::open_live_slot(Slot &slot, std::shared_ptr<Camera> camera)
@@ -697,7 +592,7 @@ bool BevPipeline::start_live_cameras()
     return true;
 }
 
-bool BevPipeline::render_surround_live()
+bool BevPipeline::render_surround()
 {
     live_bufs_.clear();
     live_reqs_.clear();
@@ -761,8 +656,8 @@ void BevPipeline::release_live_slots()
 
 // ── Test pattern ─────────────────────────────────────────────────────────────
 // Scrolling BT.601 colour bars, CPU-generated NV12 through the same sysmem
-// upload path file mode uses -- enough to prove a shell composites the view
-// with no camera and no recording.
+// upload path the CPU-converted cameras use -- enough to prove a shell
+// composites the view with no camera.
 
 bool BevPipeline::init_pattern()
 {

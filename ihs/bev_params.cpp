@@ -57,8 +57,6 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
     const std::string text(data ? reinterpret_cast<const char *>(data) : "", data ? size : 0);
 
     bool mode_set = false;
-    const char *named[4] = {nullptr, nullptr, nullptr, nullptr};
-    std::string named_store[4];
 
     size_t pos = 0;
     int lineno = 0;
@@ -82,7 +80,6 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
             error = "line " + std::to_string(lineno) + ": " + key + "=" + val + " is not " + what;
             return false;
         };
-        auto num = [&](double &field) { return to_double(val, field) || bad("a number"); };
         auto num_set = [&](double &field, bool &set) {
             if (!to_double(val, field)) return bad("a number");
             set = true;
@@ -91,10 +88,9 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
 
         if (key == "mode") {
             if      (val == "camera")   out.mode = BevParams::Mode::Camera;
-            else if (val == "file")     out.mode = BevParams::Mode::File;
             else if (val == "surround") out.mode = BevParams::Mode::Surround;
             else if (val == "pattern")  out.mode = BevParams::Mode::Pattern;
-            else return bad("camera|file|surround|pattern");
+            else return bad("camera|surround|pattern");
             mode_set = true;
         } else if (key == "fit") {
             if      (val == "contain") out.fit = BevParams::Fit::Contain;
@@ -124,28 +120,10 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
                 return bad("a frame rate (0 = leave it to auto-exposure)");
         } else if (key == "tuning_file") {
             out.tuning_file = resolve_path(val, assets_dir);
-        } else if (key == "file") {
-            out.file = resolve_path(val, assets_dir);
-        } else if (key == "bev") {
-            if (!to_bool(val, out.bev)) return bad("a boolean");
-        } else if (key == "cam_h") {
-            if (!num(out.cam_h)) return false;
-        } else if (key == "pitch") {
-            if (!num(out.pitch)) return false;
-        } else if (key == "yaw") {
-            if (!num(out.yaw)) return false;
-        } else if (key == "cam_y") {
-            if (!num(out.cam_y)) return false;
         } else if (key == "px_per_m") {
             if (!num_set(out.px_per_m, out.px_per_m_set)) return false;
         } else if (key == "src") {
-            out.sources.push_back(resolve_path(val, assets_dir));
-        } else if (key == "forward_left" || key == "forward_right" ||
-                   key == "backward_left" || key == "backward_right") {
-            const int slot = key == "forward_left"  ? 0 : key == "forward_right" ? 1
-                           : key == "backward_left" ? 2 : 3;
-            named_store[slot] = resolve_path(val, assets_dir);
-            named[slot] = named_store[slot].c_str();
+            out.sources.push_back(val);
         } else if (key == "config") {
             out.config_path = resolve_path(val, assets_dir);
         } else if (key == "lens_dir") {
@@ -153,8 +131,8 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
         } else if (key == "undistort") {
             if (!to_double(val, out.undistort) || out.undistort < 0.0) return bad("a zoom, 0 = off");
         } else if (key == "blend") {
-            if (val != "feather" && val != "pyramid" && val != "coverage")
-                return bad("feather|pyramid|coverage");
+            if (val != "feather" && val != "coverage")
+                return bad("feather|coverage");
             out.blend = val;
         } else if (key == "car_icon") {
             out.car_icon = resolve_path(val, assets_dir);
@@ -172,40 +150,11 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
         }
     }
 
-    // Same source rules as main.cpp's argv handling.
-    const bool any_named = named[0] || named[1] || named[2] || named[3];
-    if (any_named && !out.sources.empty()) {
-        error = "forward_*/backward_* can't be combined with src";
-        return false;
-    }
-    if (any_named) {
-        if ((named[0] != nullptr) != (named[1] != nullptr)) {
-            error = "forward_left and forward_right must be given together";
-            return false;
-        }
-        if ((named[2] != nullptr) != (named[3] != nullptr)) {
-            error = "backward_left and backward_right must be given together";
-            return false;
-        }
-        for (int slot = 0; slot < 4; ++slot) {
-            if (!named[slot]) continue;
-            out.sources.push_back(named_store[slot]);
-            out.cfg_slots.push_back(slot);
-        }
-    } else {
-        for (size_t i = 0; i < out.sources.size(); ++i) out.cfg_slots.push_back((int)i);
-    }
+    for (size_t i = 0; i < out.sources.size(); ++i) out.cfg_slots.push_back((int)i);
 
-    if (!mode_set) {
-        if (!out.sources.empty())   out.mode = BevParams::Mode::Surround;
-        else if (!out.file.empty()) out.mode = BevParams::Mode::File;
-    }
-    if (out.mode == BevParams::Mode::File && out.file.empty()) {
-        error = "mode=file needs file=<path>";
-        return false;
-    }
+    if (!mode_set && !out.sources.empty()) out.mode = BevParams::Mode::Surround;
     if (out.mode == BevParams::Mode::Surround && out.sources.empty()) {
-        error = "mode=surround needs src=<path> (or forward_*/backward_*)";
+        error = "mode=surround needs src=camera:<index> or src=position:<name>";
         return false;
     }
     return true;

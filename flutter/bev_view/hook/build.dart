@@ -50,9 +50,6 @@ void main(List<String> args) async {
       '-B', buildDir,
       '-DCMAKE_BUILD_TYPE=$buildType',
       '-DENABLE_IHS_PV=ON',
-      // The --preview window is the CLI's; the view never needs a compositor
-      // connection of its own.
-      '-DENABLE_WAYLAND_PREVIEW=OFF',
       '-DENABLE_IHS_PV_VULKAN=${enableVulkan ? 'ON' : 'OFF'}',
       if (ihsDir != null) '-DIHS_DIR=$ihsDir',
       if (ihsBuildDir != null)

@@ -1,7 +1,6 @@
 build/
 build-native/
 build-agl-sdk/
-libcamera-dmabuf-capture
 *.raw
 README.md
 README.md

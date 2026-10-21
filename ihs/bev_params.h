@@ -1,26 +1,22 @@
 #pragma once
 
 // A platform view's creation params: UTF-8 "key=value" lines, one per line,
-// '#' comments and blank lines ignored. The CLI flags map onto them one to one
-// (--forward-left -> forward_left=...), so a working command line is a working
-// view. `src` may repeat. Paths prefixed "asset:" resolve against the running
-// bundle's flutter_assets directory.
+// '#' comments and blank lines ignored. `src` may repeat. Paths prefixed
+// "asset:" resolve against the running bundle's flutter_assets directory.
 //
-//   mode        camera | file | surround | pattern   (default: surround when a
-//               source is given, file when `file` is, else camera)
+//   mode        camera | surround | pattern   (default: surround when a
+//               source is given, else camera)
 //   fit         contain | cover | fill               (default contain)
 //   ring_size   2..6 dma-bufs per view               (default 4)
 //   scanout     1 = take a KMS plane when the shell offers one (EGL DRM only)
 //
 //   camera:   camera_id (libcamera's id) or camera_index, width, height,
 //             tuning_file
-//   file:     file, bev, cam_h, pitch, yaw, cam_y, px_per_m
-//   surround: src (repeatable: a file, camera:<index> or position:<name>, the
-//             camera bev_config.ini mounts there) | forward_left, forward_right, backward_left,
-//             backward_right; config, lens_dir, blend (feather | pyramid |
+//   surround: src (repeatable: camera:<index> or position:<name>, the camera
+//             bev_config.ini mounts there); config, lens_dir, blend (feather |
 //             coverage), px_per_m, car_icon, car_width, car_length, car_x, car_y
 //   pattern:  width, height, pattern_fps -- a synthetic moving test image, for
-//             bringing a shell up without a camera or a recording. 0 fps runs
+//             bringing a shell up without a camera. 0 fps runs
 //             it flat out, which is how you measure what the view can actually
 //             carry on a board.
 
@@ -30,7 +26,7 @@
 #include <vector>
 
 struct BevParams {
-    enum class Mode { Camera, File, Surround, Pattern };
+    enum class Mode { Camera, Surround, Pattern };
     enum class Fit  { Contain, Cover, Fill };
 
     Mode mode      = Mode::Camera;
@@ -65,23 +61,17 @@ struct BevParams {
     // and AE trades gain instead -- a noisier frame at a rate you chose.
     double camera_fps = 0.0;
 
-    // Pattern mode's frame rate. The other modes pace to their source (the
-    // sensor, or the recording's rate); the pattern has none, so it paces
-    // itself. 0 = uncapped.
+    // Pattern mode's frame rate. The other modes pace to the sensor; the
+    // pattern has none, so it paces itself. 0 = uncapped.
     double pattern_fps = 30.0;
 
-    // File mode; the IPM pose is shared with --bev.
-    std::string file;
-    bool        bev   = false;
-    double      cam_h = 1.2, pitch = -30.0, yaw = 0.0, cam_y = 0.0;
-
-    // Shared by file and surround modes. Surround mode falls back to the
-    // config file's px_per_m unless this was given.
+    // Surround mode falls back to the config file's px_per_m unless this
+    // was given.
     double px_per_m     = 100.0;
     bool   px_per_m_set = false;
 
     // Surround mode. cfg_slots[i] is the bev_config.ini slot sources[i] reads
-    // its pose/hb2i from -- identity for `src`, fixed 0..3 for the named keys.
+    // its pose/hb2i from.
     std::vector<std::string> sources;
     std::vector<int>         cfg_slots;
     std::string              config_path = "bev_config.ini";
@@ -99,7 +89,7 @@ struct BevParams {
 
 // Parses @size bytes of creation params into @out. Returns false with a
 // description in @error for anything that cannot be used (an unknown mode, a
-// malformed number, --src mixed with the named sources); unknown keys are
+// malformed number); unknown keys are
 // reported on stderr and skipped. @assets_dir may be empty.
 bool bev_params_parse(const uint8_t *data, size_t size, const std::string &assets_dir,
                       BevParams &out, std::string &error);

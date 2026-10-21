@@ -11,7 +11,7 @@ enum BevFit {
 }
 
 /// The surround blend backends, as the CLI's `--blend`.
-enum BevBlend { feather, pyramid, coverage }
+enum BevBlend { feather, coverage }
 
 /// What a BevView renders.
 ///
@@ -69,47 +69,6 @@ final class BevCameraSource extends BevSource {
   ];
 }
 
-/// A camera pose on the ground plane, for single-file BEV (`--bev`).
-final class BevGroundPose {
-  const BevGroundPose({
-    this.cameraHeight = 1.2,
-    this.pitch = -30.0,
-    this.yaw = 0.0,
-    this.cameraY = 0.0,
-    this.pxPerMeter = 100.0,
-  });
-
-  final double cameraHeight;
-  final double pitch;
-  final double yaw;
-  final double cameraY;
-  final double pxPerMeter;
-}
-
-/// One HEVC recording (`--file`), optionally warped to a forward BEV.
-final class BevFileSource extends BevSource {
-  const BevFileSource(this.path, {this.bev});
-
-  final String path;
-
-  /// When set, renders the forward bird's-eye view from this pose.
-  final BevGroundPose? bev;
-
-  @override
-  List<MapEntry<String, String>> toParams() => [
-    const MapEntry('mode', 'file'),
-    MapEntry('file', path),
-    if (bev case final pose?) ...[
-      const MapEntry('bev', '1'),
-      MapEntry('cam_h', '${pose.cameraHeight}'),
-      MapEntry('pitch', '${pose.pitch}'),
-      MapEntry('yaw', '${pose.yaw}'),
-      MapEntry('cam_y', '${pose.cameraY}'),
-      MapEntry('px_per_m', '${pose.pxPerMeter}'),
-    ],
-  ];
-}
-
 /// The car icon composited over the surround canvas's blind centre.
 final class BevCarIcon {
   const BevCarIcon(this.path, {this.width, this.length, this.x, this.y});
@@ -123,12 +82,12 @@ final class BevCarIcon {
   final double? y;
 }
 
-/// The N-camera surround view (`--src`, or the named `--forward-*` /
-/// `--backward-*` pairs), with per-slot calibration from a bev_config.ini.
+/// The N-camera surround view, with per-slot calibration from a
+/// bev_config.ini.
 final class BevSurroundSource extends BevSource {
-  /// Sources in config-slot order, as repeated `--src`.
+  /// Sources in config-slot order: `camera:<index>` or `position:<name>`.
   const BevSurroundSource(
-    List<String> this.sources, {
+    this.sources, {
     this.undistort,
     this.config = 'bev_config.ini',
     this.lensDir,
@@ -138,39 +97,15 @@ final class BevSurroundSource extends BevSource {
     this.fps,
     this.width,
     this.height,
-  }) : forwardLeft = null,
-       forwardRight = null,
-       backwardLeft = null,
-       backwardRight = null;
+  });
 
-  /// The front/back pair rig: each recording pinned to its fixed config slot
-  /// (0..3), so a backward-only run still reads slots 2 and 3.
-  const BevSurroundSource.pairs({
-    this.forwardLeft,
-    this.forwardRight,
-    this.backwardLeft,
-    this.backwardRight,
-    this.config = 'bev_config.ini',
-    this.lensDir,
-    this.blend = BevBlend.feather,
-    this.pxPerMeter,
-    this.carIcon,
-    this.fps,
-    this.width,
-    this.height,
-  }) : sources = null, undistort = null;
-
-  final List<String>? sources;
+  final List<String> sources;
 
   /// One camera seen straight on instead of on the ground: its lens
   /// distortion removed and zoomed out by this factor (1 = the camera's own
   /// field, below 1 wider, as a fisheye needs). Needs no surround
   /// calibration.
   final double? undistort;
-  final String? forwardLeft;
-  final String? forwardRight;
-  final String? backwardLeft;
-  final String? backwardRight;
 
   final String config;
 
@@ -182,8 +117,8 @@ final class BevSurroundSource extends BevSource {
   final double? pxPerMeter;
   final BevCarIcon? carIcon;
 
-  /// Live cameras only: pins the sensors' frame rate, and the requested
-  /// stream size (the same for every camera).
+  /// Pins the sensors' frame rate, and the requested stream size (the same
+  /// for every camera).
   final double? fps;
   final int? width;
   final int? height;
@@ -195,11 +130,7 @@ final class BevSurroundSource extends BevSource {
     if (fps != null) MapEntry('camera_fps', '$fps'),
     if (width != null) MapEntry('width', '$width'),
     if (height != null) MapEntry('height', '$height'),
-    for (final src in sources ?? const <String>[]) MapEntry('src', src),
-    if (forwardLeft != null) MapEntry('forward_left', forwardLeft!),
-    if (forwardRight != null) MapEntry('forward_right', forwardRight!),
-    if (backwardLeft != null) MapEntry('backward_left', backwardLeft!),
-    if (backwardRight != null) MapEntry('backward_right', backwardRight!),
+    for (final src in sources) MapEntry('src', src),
     MapEntry('config', config),
     if (lensDir != null) MapEntry('lens_dir', lensDir!),
     MapEntry('blend', blend.name),
@@ -215,7 +146,7 @@ final class BevSurroundSource extends BevSource {
 }
 
 /// Scrolling colour bars generated on the CPU -- for bringing a shell up with
-/// no camera and no recording.
+/// no camera.
 final class BevPatternSource extends BevSource {
   const BevPatternSource({
     this.width = 1280,
@@ -226,8 +157,8 @@ final class BevPatternSource extends BevSource {
   final int width;
   final int height;
 
-  /// Frames per second the pattern paces itself to. The other sources pace to
-  /// their own input; this one has none. 0 runs it flat out, which is how you
+  /// Frames per second the pattern paces itself to. The cameras pace
+  /// themselves; this one has no input to follow. 0 runs it flat out, which is how you
   /// measure what the view can carry on a board.
   final double fps;
 
