@@ -434,16 +434,6 @@ bool BevPipeline::init_surround()
         std::printf("[bev/surround] every camera imported zero-copy\n");
     }
 
-    if (!params_.car_icon.empty()) {
-        const double w = params_.car_width_set  ? params_.car_width  : cfg.car_width;
-        const double l = params_.car_length_set ? params_.car_length : cfg.car_length;
-        const double x = params_.car_x_set      ? params_.car_x      : cfg.car_x;
-        const double y = params_.car_y_set      ? params_.car_y      : cfg.car_y;
-        if (!renderer_->init_car_icon(params_.car_icon.c_str(), (float)w, (float)l, (float)x, (float)y))
-            std::fprintf(stderr, "[bev/surround] car icon '%s' failed to load -- continuing "
-                                 "without it\n", params_.car_icon.c_str());
-    }
-
     double px_per_m = params_.px_per_m_set ? params_.px_per_m : cfg.px_per_m;
     double view_cx = 0.0, view_cy = 0.0;
     if (!params_.px_per_m_set) {

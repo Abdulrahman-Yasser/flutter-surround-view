@@ -17,7 +17,7 @@ import 'package:flutter/material.dart';
 ///   BEV_CAMERAS     number of live cameras, slots 0..N-1       (surround)
 ///   BEV_WIDTH / BEV_HEIGHT   live camera stream size            (surround)
 ///   BEV_CONFIG      bev_config.ini path                        (surround)
-///   BEV_LENS_DIR, BEV_BLEND, BEV_PX_PER_M, BEV_CAR_ICON        (surround)
+///   BEV_LENS_DIR, BEV_BLEND, BEV_PX_PER_M                      (surround)
 ///   BEV_FIT         contain (default) | cover | fill
 ///   BEV_SCANOUT     1 = take a KMS plane when the shell offers one
 BevSource sourceFromEnvironment(Map<String, String> env) {
@@ -36,7 +36,6 @@ BevSource sourceFromEnvironment(Map<String, String> env) {
     case 'surround':
       final blend = BevBlend.values.asNameMap()[get('BEV_BLEND') ?? 'feather'] ??
           BevBlend.feather;
-      final carIcon = get('BEV_CAR_ICON');
       final cameras = int.tryParse(get('BEV_CAMERAS') ?? '') ?? 1;
       return BevSurroundSource(
         [for (var i = 0; i < cameras; i++) 'camera:$i'],
@@ -44,7 +43,6 @@ BevSource sourceFromEnvironment(Map<String, String> env) {
         lensDir: get('BEV_LENS_DIR'),
         blend: blend,
         pxPerMeter: double.tryParse(get('BEV_PX_PER_M') ?? ''),
-        carIcon: carIcon == null ? null : BevCarIcon(carIcon),
         fps: double.tryParse(get('BEV_CAM_FPS') ?? ''),
         width: int.tryParse(get('BEV_WIDTH') ?? ''),
         height: int.tryParse(get('BEV_HEIGHT') ?? ''),

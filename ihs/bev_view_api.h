@@ -83,9 +83,6 @@ BEV_EXPORT void bev_view_set_blend_edge(int64_t view_id, double value);
 // Surround mode: ignore each camera's facing wedge (testing aid).
 BEV_EXPORT void bev_view_set_free_yaw(int64_t view_id, int32_t enable);
 
-// Surround mode: move the car icon, world meters from the canvas centre.
-BEV_EXPORT void bev_view_set_car_center(int64_t view_id, double x_m, double y_m);
-
 // Queue a PNG snapshot of the pipeline output to @path. Returns 1 if queued.
 BEV_EXPORT int32_t bev_view_snapshot(int64_t view_id, const char *path);
 

@@ -117,13 +117,8 @@ struct BevConfig {
     float         blend_edge  = 0.45f;
     BevSlotConfig slots[kMaxSlots];
 
-    // Car icon overlay (see GpuRenderer::init_car_icon()/draw_car_icon()) --
-    // world-meter position offset from the BEV canvas center (the vehicle's
-    // own world origin, BEV_ALGORITHM.md §3) plus its real width/length in
-    // meters. car_x/car_y stay 0 for a rig whose calibrated center already
-    // matches the canvas center; nonzero nudges the icon to correct for a
-    // mismatch instead of touching the geometry itself. --car-x/--car-y/
-    // --car-width/--car-length on the command line override these.
+    // Vehicle footprint, meters, and its offset from the canvas center
+    // (the car's own world origin, BEV_ALGORITHM.md §3).
     double car_x      = 0.0;
     double car_y      = 0.0;
     double car_width  = 1.8;

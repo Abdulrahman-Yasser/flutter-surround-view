@@ -135,10 +135,6 @@ class BevViewController {
   void setFreeYaw(bool enabled) =>
       ffi.bev_view_set_free_yaw(viewId, enabled ? 1 : 0);
 
-  /// Moves the surround car icon, world meters from the canvas centre.
-  void setCarCenter(double xMeters, double yMeters) =>
-      ffi.bev_view_set_car_center(viewId, xMeters, yMeters);
-
   /// Writes a PNG of the pipeline output to [path], on the shell's filesystem.
   /// Returns whether it was queued.
   bool snapshot(String path) {
