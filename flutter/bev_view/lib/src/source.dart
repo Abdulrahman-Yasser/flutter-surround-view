@@ -69,19 +69,6 @@ final class BevCameraSource extends BevSource {
   ];
 }
 
-/// The car icon composited over the surround canvas's blind centre.
-final class BevCarIcon {
-  const BevCarIcon(this.path, {this.width, this.length, this.x, this.y});
-
-  final String path;
-
-  /// Meters; each falls back to the config file's value when null.
-  final double? width;
-  final double? length;
-  final double? x;
-  final double? y;
-}
-
 /// The N-camera surround view, with per-slot calibration from a
 /// bev_config.ini.
 final class BevSurroundSource extends BevSource {
@@ -93,7 +80,6 @@ final class BevSurroundSource extends BevSource {
     this.lensDir,
     this.blend = BevBlend.feather,
     this.pxPerMeter,
-    this.carIcon,
     this.fps,
     this.width,
     this.height,
@@ -115,7 +101,6 @@ final class BevSurroundSource extends BevSource {
 
   /// Overrides the config file's px_per_m.
   final double? pxPerMeter;
-  final BevCarIcon? carIcon;
 
   /// Pins the sensors' frame rate, and the requested stream size (the same
   /// for every camera).
@@ -135,13 +120,6 @@ final class BevSurroundSource extends BevSource {
     if (lensDir != null) MapEntry('lens_dir', lensDir!),
     MapEntry('blend', blend.name),
     if (pxPerMeter != null) MapEntry('px_per_m', '$pxPerMeter'),
-    if (carIcon case final icon?) ...[
-      MapEntry('car_icon', icon.path),
-      if (icon.width != null) MapEntry('car_width', '${icon.width}'),
-      if (icon.length != null) MapEntry('car_length', '${icon.length}'),
-      if (icon.x != null) MapEntry('car_x', '${icon.x}'),
-      if (icon.y != null) MapEntry('car_y', '${icon.y}'),
-    ],
   ];
 }
 

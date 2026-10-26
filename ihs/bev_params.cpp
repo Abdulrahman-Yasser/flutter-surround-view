@@ -134,16 +134,6 @@ bool bev_params_parse(const uint8_t *data, size_t size, const std::string &asset
             if (val != "feather" && val != "coverage")
                 return bad("feather|coverage");
             out.blend = val;
-        } else if (key == "car_icon") {
-            out.car_icon = resolve_path(val, assets_dir);
-        } else if (key == "car_width") {
-            if (!num_set(out.car_width, out.car_width_set)) return false;
-        } else if (key == "car_length") {
-            if (!num_set(out.car_length, out.car_length_set)) return false;
-        } else if (key == "car_x") {
-            if (!num_set(out.car_x, out.car_x_set)) return false;
-        } else if (key == "car_y") {
-            if (!num_set(out.car_y, out.car_y_set)) return false;
         } else {
             std::fprintf(stderr, "[bev/params] line %d: unknown key '%s' ignored\n",
                          lineno, key.c_str());

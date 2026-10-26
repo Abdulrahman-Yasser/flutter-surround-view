@@ -52,11 +52,6 @@ set_target_properties(bev_core PROPERTIES
 )
 target_include_directories(bev_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-# Header-only (github.com/nothings/stb, vendored as a git submodule) -- used
-# for the car icon's image load (gpu_renderer.cpp's read_png_rgba()); no
-# library to link, just needs its directory on the include path.
-target_include_directories(bev_core PRIVATE extern/stb)
-
 target_link_libraries(bev_core PUBLIC
     bev_conf
     PkgConfig::LIBCAMERA

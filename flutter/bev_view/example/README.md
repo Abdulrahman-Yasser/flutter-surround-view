@@ -348,7 +348,7 @@ arguments, so the source is chosen from the environment:
 | `BEV_CAM_FPS` | pin the sensor's frame duration; unset leaves the rate to auto-exposure, which trades it for light |
 | `BEV_CAMERAS`, `BEV_WIDTH`, `BEV_HEIGHT` | surround: live cameras 0..N-1 and their stream size |
 | `BEV_CONFIG`, `BEV_LENS_DIR` | `bev_config.ini`; lens file directory |
-| `BEV_BLEND`, `BEV_PX_PER_M`, `BEV_CAR_ICON` | `feather`/`coverage`; overrides; car PNG |
+| `BEV_BLEND`, `BEV_PX_PER_M` | `feather`/`coverage`; overrides |
 | `BEV_FIT` | `contain` (default), `cover`, `fill` |
 | `BEV_SCANOUT=1` | request a KMS plane when the shell offers one |
 | `BEV_RENDER_NODE` | native: the DRM render node the view's EGL display opens |

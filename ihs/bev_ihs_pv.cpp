@@ -811,13 +811,6 @@ extern "C" BEV_EXPORT void bev_view_set_free_yaw(int64_t view_id, int32_t enable
     });
 }
 
-extern "C" BEV_EXPORT void bev_view_set_car_center(int64_t view_id, double x_m, double y_m)
-{
-    with_view(view_id, [&](ViewInstance &v) {
-        v.post([x_m, y_m](BevPipeline &p) { p.renderer()->set_car_center((float)x_m, (float)y_m); });
-    });
-}
-
 extern "C" BEV_EXPORT int32_t bev_view_snapshot(int64_t view_id, const char *path)
 {
     if (!path || !*path) return 0;

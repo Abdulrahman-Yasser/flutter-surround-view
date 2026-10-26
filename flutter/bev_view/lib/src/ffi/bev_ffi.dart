@@ -75,8 +75,5 @@ external void bev_view_set_blend_edge(int viewId, double value);
 @Native<Void Function(Int64, Int32)>()
 external void bev_view_set_free_yaw(int viewId, int enable);
 
-@Native<Void Function(Int64, Double, Double)>()
-external void bev_view_set_car_center(int viewId, double xM, double yM);
-
 @Native<Int32 Function(Int64, Pointer<Char>)>()
 external int bev_view_snapshot(int viewId, Pointer<Char> path);

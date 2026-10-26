@@ -14,7 +14,7 @@
 //             tuning_file
 //   surround: src (repeatable: camera:<index> or position:<name>, the camera
 //             bev_config.ini mounts there); config, lens_dir, blend (feather |
-//             coverage), px_per_m, car_icon, car_width, car_length, car_x, car_y
+//             coverage), px_per_m
 //   pattern:  width, height, pattern_fps -- a synthetic moving test image, for
 //             bringing a shell up without a camera. 0 fps runs
 //             it flat out, which is how you measure what the view can actually
@@ -81,10 +81,6 @@ struct BevParams {
     // lens distortion removed, zoomed out by undistort (0 = off, 1 = the
     // camera's own field, below 1 wider, as a fisheye needs). Needs no hb2i.
     double                   undistort   = 0.0;
-    std::string              car_icon;
-    double car_width  = 1.8, car_length = 4.5, car_x = 0.0, car_y = 0.0;
-    bool   car_width_set = false, car_length_set = false;
-    bool   car_x_set     = false, car_y_set      = false;
 };
 
 // Parses @size bytes of creation params into @out. Returns false with a

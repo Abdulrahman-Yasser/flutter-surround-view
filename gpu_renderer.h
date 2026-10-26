@@ -140,29 +140,8 @@ public:
                               float k1, float k2, float k3, float p1, float p2);
     int  num_cameras_multi() const { return num_cameras_multi_; }
 
-    // Loads a top-down car PNG (RGBA, transparent background, front at image
-    // row 0) once and records real vehicle width/length in meters, so
-    // draw_car_icon() can composite it -- correctly scaled -- over the BEV
-    // canvas's permanently camera-blind center (no camera mounted on the
-    // vehicle can see under/through it, so that region is otherwise always
-    // black -- see kFS_MULTI's weightSum==0 fallback). center_x_m/center_y_m
-    // offset that placement (world meters, same X-right/Y-forward convention
-    // as everything else -- BEV_ALGORITHM.md §3) away from the canvas center,
-    // for a rig whose calibrated center doesn't quite match it; 0,0 keeps the
-    // icon exactly centered, the prior behavior. Returns false (the renderer
-    // keeps working, just without the icon) if the file can't be read --
-    // this is a cosmetic overlay, not required for rendering to function.
-    // Composited by draw_car_icon() from both render_frame_multi() and
-    // render_frame_multi_pyramid()'s tails (both write to fbo_tex_), so it
-    // shows up under every --blend mode.
-    bool init_car_icon(const char *png_path, float width_m, float length_m,
-                       float center_x_m = 0.0f, float center_y_m = 0.0f);
-    // Live re-center, e.g. from a keypress -- cheap, recomputes just the
-    // uCenter uniform (see kVS_CAR) from the last px_per_m set_px_per_m()
-    // saw. No-op if init_car_icon() was never called/failed.
-    void set_car_center(float center_x_m, float center_y_m);
-    // Car-frame point at the canvas centre, metres. The blend wedges and the
-    // car icon stay anchored to the car, not to the canvas.
+    // Car-frame point at the canvas centre, metres. The blend wedges stay
+    // anchored to the car, not to the canvas.
     void set_view_center(float x_m, float y_m);
 
     // N-camera surround-view BEV, multi-band (Laplacian pyramid) blend —
@@ -224,12 +203,6 @@ private:
     void        upload_nv12(const DmaBufFrame &f, GLuint tex_y, GLuint tex_uv,
                             int unit_y, int unit_uv);
     void        collect_timer();
-    // Composites the loaded car icon (if any) over whatever's currently
-    // bound as the color attachment -- called from both
-    // render_frame_multi() and render_frame_multi_pyramid()'s tails, right
-    // before their glFlush(). No-op if init_car_icon() was never
-    // called/failed (prog_car_ == 0).
-    void        draw_car_icon();
 
     const EGLState *egl_    = nullptr;
     int             W_      = 0;
@@ -274,18 +247,7 @@ private:
     GLint  u_dist2_multi_[kMaxCameras] = {};
     int    num_cameras_multi_ = 0;
 
-    // Car icon overlay (draw_car_icon()) -- own tiny program/texture, no
-    // relation to the per-camera arrays above.
-    GLuint prog_car_     = 0;
-    GLuint tex_car_      = 0;
-    float  car_half_w_m_ = 0.0f;   // vehicle width  / 2, meters
-    float  car_half_l_m_ = 0.0f;   // vehicle length / 2, meters
-    float  car_center_x_m_ = 0.0f; // world-meter offset from canvas center
-    float  car_center_y_m_ = 0.0f;
-    // Last px_per_m set_px_per_m() saw -- cached so set_car_center() can
-    // recompute uCenter independently (e.g. from a keypress) without the
-    // caller having to re-pass px_per_m every time, symmetric with
-    // car_half_w_m_/car_half_l_m_ already being cached for the same reason.
+    // Last px_per_m, so set_view_center() can re-apply it.
     float  px_per_m_ = 100.0f;
     float  view_cx_m_ = 0.0f, view_cy_m_ = 0.0f;
 
