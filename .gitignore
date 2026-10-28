@@ -1,21 +1,25 @@
+# CMake / native builds
 build/
-build-native/
-build-agl-sdk/
+build-*/
+compile_commands.json
 *.raw
-README.md
-README.md
-README.md
+
+# Flutter / Dart
+.dart_tool/
+**/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+flutter/**/pubspec.lock
+flutter-surround-view/linux/
+flutter-surround-view/libapp.so*
+
+# Python
+__pycache__/
+
+# Notes kept out of the repo
 *.md
 !flutter/**/*.md
-scripts/__pycache__/*
-extern/
 
-# JetBrains project files
+# IDE
 .idea/
-
-# Flutter and IDE generated files
-compile_commands.json
-flutter-surround-view/.dart_tool/
-flutter-surround-view/linux/
-flutter-surround-view/libapp.so.*
-scripts/__pycache__/make_boards.cpython-310.pyc
+*.iml
